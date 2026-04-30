@@ -202,7 +202,7 @@ function LoadingScreen({ visible }: { visible: boolean }) {
         style={{
           fontFamily: 'var(--font-bebas)',
           fontSize: 'clamp(2rem, 6vw, 4rem)',
-          color: '#ffffff',
+          color: '#0D2137',
           letterSpacing: '0.05em',
           marginBottom: '2rem',
           textAlign: 'center',
@@ -232,7 +232,7 @@ function LoadingScreen({ visible }: { visible: boolean }) {
           marginTop: '2rem',
           width: 'clamp(180px, 30vw, 340px)',
           height: '3px',
-          backgroundColor: 'rgba(255,255,255,0.15)',
+          backgroundColor: 'rgba(0,0,0,0.10)',
           borderRadius: '2px',
           overflow: 'hidden',
         }}
@@ -252,11 +252,10 @@ function LoadingScreen({ visible }: { visible: boolean }) {
       <p
         style={{
           marginTop: '0.75rem',
-          color: '#ffffff',
+          color: '#64748B',
           fontSize: '0.7rem',
           letterSpacing: '0.18em',
           textTransform: 'uppercase',
-          opacity: 0.7,
         }}
       >
         Loading this week&apos;s numbers...
@@ -269,11 +268,10 @@ function LoadingScreen({ visible }: { visible: boolean }) {
           bottom: '1.5rem',
           left: '50%',
           transform: 'translateX(-50%)',
-          color: '#ffffff',
+          color: 'rgba(13,33,55,0.35)',
           fontSize: '0.6rem',
           letterSpacing: '0.25em',
           textTransform: 'lowercase',
-          opacity: 0.4,
           whiteSpace: 'nowrap',
         }}
       >
