@@ -221,6 +221,7 @@ function LoadingScreen({ visible }: { visible: boolean }) {
         playsInline
         style={{
           width: 'clamp(340px, 60vw, 660px)',
+          maxWidth: '100%',
           borderRadius: '12px',
           display: 'block',
         }}
