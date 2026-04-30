@@ -220,7 +220,7 @@ function LoadingScreen({ visible }: { visible: boolean }) {
         loop
         playsInline
         style={{
-          width: 'clamp(180px, 30vw, 340px)',
+          width: 'clamp(340px, 60vw, 660px)',
           borderRadius: '12px',
           display: 'block',
         }}
@@ -230,7 +230,7 @@ function LoadingScreen({ visible }: { visible: boolean }) {
       <div
         style={{
           marginTop: '2rem',
-          width: 'clamp(180px, 30vw, 340px)',
+          width: 'clamp(340px, 60vw, 660px)',
           height: '3px',
           backgroundColor: 'rgba(0,0,0,0.10)',
           borderRadius: '2px',
