@@ -296,7 +296,12 @@ function buildFeatureAdoption(
     wauBreakdown.breakdown['true'] ??
     wauBreakdown.breakdown['True'] ??
     new Array(wauBreakdown.series.length).fill(0)
-  const wauSeries = wauBreakdown.series
+
+  // Use WAU breakdown series if present; otherwise fall back to the first feature series
+  // so bar charts still have data even when the $session_start breakdown returns nothing.
+  const wauSeries = wauBreakdown.series.length > 0
+    ? wauBreakdown.series
+    : (featureResults.find((r) => r.series.length > 0)?.series ?? [])
 
   // Align feature series to WAU series by date
   const partial = isPartialWeek(premiumWAUValues)

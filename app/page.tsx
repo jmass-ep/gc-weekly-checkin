@@ -423,7 +423,7 @@ function FeatureCard({ feature, premiumWAU }: { feature: FeatureMetric; premiumW
   const [mounted, setMounted] = useState(false)
   useEffect(() => { setMounted(true) }, [])
 
-  const chartData = feature.history.map((h) => ({ week: h.week, value: h.adoptionPct ?? 0 }))
+  const chartData = feature.history.map((h) => ({ week: h.week, value: h.users }))
 
   return (
     <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 flex flex-col gap-3">
@@ -453,7 +453,7 @@ function FeatureCard({ feature, premiumWAU }: { feature: FeatureMetric; premiumW
               <XAxis dataKey="week" tick={{ fontSize: 9, fill: '#64748B' }} axisLine={false} tickLine={false} />
               <YAxis hide />
               <Tooltip
-                formatter={(v) => typeof v === 'number' ? `${v.toFixed(2)}%` : String(v)}
+                formatter={(v) => typeof v === 'number' ? v.toLocaleString() : String(v)}
                 labelFormatter={(label) => `Week of ${label}`}
                 contentStyle={{ fontSize: 12, border: '1px solid #E2E8F0', borderRadius: 6, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
               />
@@ -470,12 +470,14 @@ function FeatureAdoptionSection({ data: fa }: { data: FeatureAdoptionData }) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => { setMounted(true) }, [])
 
-  // Build combined chart data keyed by week
+  const hasAdoptionData = fa.features.some((f) => f.history.some((h) => (h.adoptionPct ?? 0) > 0))
+
+  // Build combined chart data — adoption % when available, user counts as fallback
   const weekMap = new Map<string, Record<string, number>>()
   fa.features.forEach((f) => {
     f.history.forEach((h) => {
       if (!weekMap.has(h.week)) weekMap.set(h.week, { week: h.week as unknown as number } as Record<string, number>)
-      weekMap.get(h.week)![f.name] = h.adoptionPct ?? 0
+      weekMap.get(h.week)![f.name] = hasAdoptionData ? (h.adoptionPct ?? 0) : h.users
     })
   })
   const combinedData = Array.from(weekMap.values())
@@ -499,7 +501,9 @@ function FeatureAdoptionSection({ data: fa }: { data: FeatureAdoptionData }) {
       {/* Combined 8-week adoption rate trend */}
       {mounted && combinedData.length > 0 && (
         <div className="bg-white border border-[#E2E8F0] rounded-xl p-5">
-          <p className="text-sm font-semibold text-[#0D2137] mb-4">8-Week Adoption Rate Trend</p>
+          <p className="text-sm font-semibold text-[#0D2137] mb-4">
+            {hasAdoptionData ? '8-Week Adoption Rate Trend' : '8-Week User Trend'}
+          </p>
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={combinedData} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
               <XAxis dataKey="week" tick={{ fontSize: 10, fill: '#64748B' }} axisLine={false} tickLine={false} />
@@ -507,11 +511,11 @@ function FeatureAdoptionSection({ data: fa }: { data: FeatureAdoptionData }) {
                 tick={{ fontSize: 10, fill: '#64748B' }}
                 axisLine={false}
                 tickLine={false}
-                tickFormatter={(v) => `${v}%`}
+                tickFormatter={(v) => hasAdoptionData ? `${v}%` : v.toLocaleString()}
                 width={36}
               />
               <Tooltip
-                formatter={(v, name) => [`${Number(v).toFixed(2)}%`, name]}
+                formatter={(v, name) => [hasAdoptionData ? `${Number(v).toFixed(2)}%` : Number(v).toLocaleString(), name]}
                 labelFormatter={(label) => `Week of ${label}`}
                 contentStyle={{ fontSize: 12, border: '1px solid #E2E8F0', borderRadius: 6, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
               />
