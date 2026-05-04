@@ -5,7 +5,6 @@ const BASE_URL = 'https://eu.mixpanel.com/api/query/segmentation'
 const FUNNEL_URL = 'https://eu.mixpanel.com/api/query/funnels'
 const ONBOARDING_FUNNEL_ID = '87658067'   // "Onboarding Funnel" in Mixpanel
 const CONVERSION_FUNNEL_ID = '53623257'   // "Sign-ups to conversion within 7 days" in Mixpanel
-const CACHE_TTL_MS = 30 * 60 * 1000 // 30 minutes
 
 interface FunnelResult {
   series: string[]
@@ -50,9 +49,6 @@ async function queryFunnel(
 
   return { series, stepCounts }
 }
-
-let cachedPayload: unknown = null
-let cacheExpiresAt = 0
 
 function toDateStr(d: Date): string {
   return d.toISOString().split('T')[0]
@@ -219,10 +215,6 @@ export async function GET() {
     return Response.json({ error: 'missing_credentials' })
   }
 
-  if (cachedPayload && Date.now() < cacheExpiresAt) {
-    return Response.json(cachedPayload)
-  }
-
   const auth = Buffer.from(`${username}:${secret}`).toString('base64')
 
   // Dynamic date range: 9 completed weeks ending last Sunday
@@ -341,8 +333,9 @@ export async function GET() {
     ],
   }
 
-  cachedPayload = payload
-  cacheExpiresAt = Date.now() + CACHE_TTL_MS
-
-  return Response.json(payload)
+  return Response.json(payload, {
+    headers: {
+      'Cache-Control': 's-maxage=1800, stale-while-revalidate=86400',
+    },
+  })
 }
