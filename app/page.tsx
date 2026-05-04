@@ -2,11 +2,10 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
+  BarChart, Bar,
+  LineChart, Line,
+  XAxis, YAxis,
+  Tooltip, Legend,
   ResponsiveContainer,
   LabelList,
 } from 'recharts'
@@ -60,11 +59,36 @@ interface ConversionRateData {
   history: SimplePoint[]
 }
 
+interface FeatureHistory {
+  week: string
+  users: number
+  adoptionPct: number | null
+}
+
+interface FeatureMetric {
+  name: string
+  color: string
+  thisWeek: number
+  previousWeek: number
+  growthPct: number | null
+  adoptionPct: number | null
+  adoptionPctPrev: number | null
+  adoptionGrowthPct: number | null
+  history: FeatureHistory[]
+}
+
+interface FeatureAdoptionData {
+  premiumWAU: number
+  features: FeatureMetric[]
+  insight: string | null
+}
+
 interface DashboardData {
   generatedAt: string
   weekLabel: string
   conversionRate: ConversionRateData
   funnel: FunnelData
+  featureAdoption: FeatureAdoptionData
   groups: GroupData[]
 }
 
@@ -395,6 +419,130 @@ function ConversionRateCard({ data: cr }: { data: ConversionRateData }) {
   )
 }
 
+function FeatureCard({ feature, premiumWAU }: { feature: FeatureMetric; premiumWAU: number }) {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
+
+  const chartData = feature.history.map((h) => ({ week: h.week, value: h.adoptionPct ?? 0 }))
+
+  return (
+    <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 flex flex-col gap-3">
+      <div className="flex items-center gap-2">
+        <span className="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: feature.color }} />
+        <p className="text-sm font-semibold text-[#0D2137] leading-snug">{feature.name}</p>
+      </div>
+
+      <div className="flex flex-col gap-0.5">
+        <span className="text-3xl font-bold text-[#1A202C] tabular-nums leading-tight">
+          {feature.thisWeek.toLocaleString()}
+        </span>
+        <div className="flex items-center gap-2">
+          {feature.adoptionPct !== null && (
+            <span className="text-xs text-[#64748B]">
+              {feature.adoptionPct.toFixed(1)}% of {premiumWAU > 0 ? premiumWAU.toLocaleString() : '—'} Premium users
+            </span>
+          )}
+        </div>
+        <GrowthBadge pct={feature.growthPct} />
+      </div>
+
+      <div className="h-24">
+        {mounted && (
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartData} margin={{ top: 2, right: 0, bottom: 0, left: 0 }} barCategoryGap="25%">
+              <XAxis dataKey="week" tick={{ fontSize: 9, fill: '#64748B' }} axisLine={false} tickLine={false} />
+              <YAxis hide />
+              <Tooltip
+                formatter={(v) => typeof v === 'number' ? `${v.toFixed(2)}%` : String(v)}
+                labelFormatter={(label) => `Week of ${label}`}
+                contentStyle={{ fontSize: 12, border: '1px solid #E2E8F0', borderRadius: 6, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
+              />
+              <Bar dataKey="value" fill={feature.color} radius={[2, 2, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function FeatureAdoptionSection({ data: fa }: { data: FeatureAdoptionData }) {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
+
+  // Build combined chart data keyed by week
+  const weekMap = new Map<string, Record<string, number>>()
+  fa.features.forEach((f) => {
+    f.history.forEach((h) => {
+      if (!weekMap.has(h.week)) weekMap.set(h.week, { week: h.week as unknown as number } as Record<string, number>)
+      weekMap.get(h.week)![f.name] = h.adoptionPct ?? 0
+    })
+  })
+  const combinedData = Array.from(weekMap.values())
+
+  return (
+    <section>
+      <h2
+        className="text-xs font-bold uppercase tracking-widest text-[#0D2137] pl-3 mb-4"
+        style={{ borderLeft: '3px solid #C8102E' }}
+      >
+        Feature Adoption — Premium Users
+      </h2>
+
+      {/* Feature cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+        {fa.features.map((f) => (
+          <FeatureCard key={f.name} feature={f} premiumWAU={fa.premiumWAU} />
+        ))}
+      </div>
+
+      {/* Combined 8-week adoption rate trend */}
+      {mounted && combinedData.length > 0 && (
+        <div className="bg-white border border-[#E2E8F0] rounded-xl p-5">
+          <p className="text-sm font-semibold text-[#0D2137] mb-4">8-Week Adoption Rate Trend</p>
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={combinedData} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
+              <XAxis dataKey="week" tick={{ fontSize: 10, fill: '#64748B' }} axisLine={false} tickLine={false} />
+              <YAxis
+                tick={{ fontSize: 10, fill: '#64748B' }}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(v) => `${v}%`}
+                width={36}
+              />
+              <Tooltip
+                formatter={(v, name) => [`${Number(v).toFixed(2)}%`, name]}
+                labelFormatter={(label) => `Week of ${label}`}
+                contentStyle={{ fontSize: 12, border: '1px solid #E2E8F0', borderRadius: 6, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
+              />
+              <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+              {fa.features.map((f) => (
+                <Line
+                  key={f.name}
+                  type="monotone"
+                  dataKey={f.name}
+                  stroke={f.color}
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* AI-generated insight */}
+      {fa.insight && (
+        <div className="mt-4 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl px-5 py-4 flex gap-3">
+          <span className="text-[#C8102E] text-lg leading-none mt-0.5">✦</span>
+          <p className="text-sm text-[#1A202C] leading-relaxed">{fa.insight}</p>
+        </div>
+      )}
+    </section>
+  )
+}
+
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -541,6 +689,11 @@ export default function DashboardPage() {
                 </h2>
                 <FunnelCard funnel={data.funnel} />
               </section>
+            )}
+
+            {/* Feature Adoption */}
+            {data?.featureAdoption && (
+              <FeatureAdoptionSection data={data.featureAdoption} />
             )}
           </main>
         )}

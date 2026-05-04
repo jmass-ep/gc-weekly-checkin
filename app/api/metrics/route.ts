@@ -1,14 +1,153 @@
 export const revalidate = 1800 // 30-minute server-side cache via Next.js Data Cache
 
+import Anthropic from '@anthropic-ai/sdk'
+
 const PROJECT_ID = '2874875'
 const BASE_URL = 'https://eu.mixpanel.com/api/query/segmentation'
 const FUNNEL_URL = 'https://eu.mixpanel.com/api/query/funnels'
-const ONBOARDING_FUNNEL_ID = '87658067'   // "Onboarding Funnel" in Mixpanel
-const CONVERSION_FUNNEL_ID = '53623257'   // "Sign-ups to conversion within 7 days" in Mixpanel
+const ONBOARDING_FUNNEL_ID = '87658067'
+const CONVERSION_FUNNEL_ID = '53623257'
+
+const PREMIUM_BREAKDOWN_ON = 'user["ep_premium_access"]'
+const PREMIUM_USER_FILTER   = 'user["ep_premium_access"] == true'
+
+const FEATURE_EVENTS = [
+  { name: 'Video Upload',     event: 'Video Uploaded',  color: '#1D9E75' },
+  { name: 'Create Watchlist', event: 'Create Watchlist', color: '#3266ad' },
+  { name: 'Message Sent',     event: 'Message sent',     color: '#BA7517' },
+  { name: 'Visited My Feed',  event: 'Visited My Feed',  color: '#7F77DD' },
+]
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface FunnelResult {
   series: string[]
   stepCounts: number[][]
+}
+
+interface SegResult {
+  series: string[]
+  values: number[]
+}
+
+interface BreakdownResult {
+  series: string[]
+  breakdown: Record<string, number[]>
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms))
+}
+
+function toDateStr(d: Date): string {
+  return d.toISOString().split('T')[0]
+}
+
+function formatWeekLabel(dateStr: string): string {
+  const [y, m, day] = dateStr.split('-').map(Number)
+  return new Date(y, m - 1, day).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function calcGrowth(current: number, previous: number): number | null {
+  if (previous === 0) return null
+  return Math.round(((current - previous) / previous) * 1000) / 10
+}
+
+function round1(n: number): number {
+  return Math.round(n * 10) / 10
+}
+
+// Detect a partial week: latest value is less than 30% of the prior rolling average
+function isPartialWeek(values: number[]): boolean {
+  const n = values.length
+  if (n < 3) return false
+  const latest = values[n - 1]
+  const prior = values.slice(Math.max(0, n - 8), n - 1)
+  const avg = prior.reduce((a, b) => a + b, 0) / prior.length
+  return avg > 0 && latest < avg * 0.3
+}
+
+// ─── Mixpanel queries ─────────────────────────────────────────────────────────
+
+async function queryMixpanel(
+  auth: string,
+  event: string,
+  fromDate: string,
+  toDate: string,
+  type: 'general' | 'unique' = 'general',
+  where?: string,
+  attempt = 0
+): Promise<SegResult> {
+  const params = new URLSearchParams({
+    project_id: PROJECT_ID,
+    event,
+    from_date: fromDate,
+    to_date: toDate,
+    unit: 'week',
+    type,
+  })
+  if (where) params.append('where', where)
+
+  const res = await fetch(`${BASE_URL}?${params}`, {
+    headers: { Authorization: `Basic ${auth}` },
+    next: { revalidate: 1800 },
+  })
+
+  if (res.status === 429 && attempt < 2) {
+    await sleep(3000 * (attempt + 1))
+    return queryMixpanel(auth, event, fromDate, toDate, type, where, attempt + 1)
+  }
+  if (!res.ok) throw new Error(`Mixpanel "${event}" → HTTP ${res.status}`)
+
+  const json = await res.json()
+  const series: string[] = json.data?.series ?? []
+  const rawValues = json.data?.values ?? {}
+  const eventValues: Record<string, number> =
+    (Object.values(rawValues)[0] as Record<string, number>) ?? {}
+  const values = series.map((date) => eventValues[date] ?? 0)
+  return { series, values }
+}
+
+async function queryMixpanelBreakdown(
+  auth: string,
+  event: string,
+  fromDate: string,
+  toDate: string,
+  on: string,
+  attempt = 0
+): Promise<BreakdownResult> {
+  const params = new URLSearchParams({
+    project_id: PROJECT_ID,
+    event,
+    from_date: fromDate,
+    to_date: toDate,
+    unit: 'week',
+    type: 'unique',
+    on,
+  })
+
+  const res = await fetch(`${BASE_URL}?${params}`, {
+    headers: { Authorization: `Basic ${auth}` },
+    next: { revalidate: 1800 },
+  })
+
+  if (res.status === 429 && attempt < 2) {
+    await sleep(3000 * (attempt + 1))
+    return queryMixpanelBreakdown(auth, event, fromDate, toDate, on, attempt + 1)
+  }
+  if (!res.ok) throw new Error(`Mixpanel breakdown "${event}" → HTTP ${res.status}`)
+
+  const json = await res.json()
+  const series: string[] = json.data?.series ?? []
+  const rawValues: Record<string, Record<string, number>> = json.data?.values ?? {}
+
+  const breakdown: Record<string, number[]> = {}
+  for (const [key, dateValues] of Object.entries(rawValues)) {
+    breakdown[key] = series.map((date) => dateValues[date] ?? 0)
+  }
+  return { series, breakdown }
 }
 
 async function queryFunnel(
@@ -37,7 +176,6 @@ async function queryFunnel(
     await sleep(3000 * (attempt + 1))
     return queryFunnel(auth, funnelId, fromDate, toDate, attempt + 1)
   }
-
   if (!res.ok) throw new Error(`Funnel → HTTP ${res.status}`)
 
   const json = await res.json()
@@ -46,72 +184,7 @@ async function queryFunnel(
     const steps: { count?: number }[] = json.data?.[date]?.steps ?? []
     return steps.map((s) => s.count ?? 0)
   })
-
   return { series, stepCounts }
-}
-
-function toDateStr(d: Date): string {
-  return d.toISOString().split('T')[0]
-}
-
-function formatWeekLabel(dateStr: string): string {
-  const [y, m, day] = dateStr.split('-').map(Number)
-  return new Date(y, m - 1, day).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
-
-function calcGrowth(current: number, previous: number): number | null {
-  if (previous === 0) return null
-  return Math.round(((current - previous) / previous) * 1000) / 10
-}
-
-interface SegResult {
-  series: string[]
-  values: number[]
-}
-
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms))
-}
-
-async function queryMixpanel(
-  auth: string,
-  event: string,
-  fromDate: string,
-  toDate: string,
-  type: 'general' | 'unique' = 'general',
-  where?: string,
-  attempt = 0
-): Promise<SegResult> {
-  const params = new URLSearchParams({
-    project_id: PROJECT_ID,
-    event,
-    from_date: fromDate,
-    to_date: toDate,
-    unit: 'week',
-    type,
-  })
-
-  if (where) params.append('where', where)
-
-  const res = await fetch(`${BASE_URL}?${params}`, {
-    headers: { Authorization: `Basic ${auth}` },
-    next: { revalidate: 1800 },
-  })
-
-  if (res.status === 429 && attempt < 2) {
-    await sleep(3000 * (attempt + 1))
-    return queryMixpanel(auth, event, fromDate, toDate, type, where, attempt + 1)
-  }
-
-  if (!res.ok) throw new Error(`Mixpanel "${event}" → HTTP ${res.status}`)
-
-  const json = await res.json()
-  const series: string[] = json.data?.series ?? []
-  const rawValues = json.data?.values ?? {}
-  const eventValues: Record<string, number> =
-    (Object.values(rawValues)[0] as Record<string, number>) ?? {}
-  const values = series.map((date) => eventValues[date] ?? 0)
-  return { series, values }
 }
 
 function safeQuery(
@@ -128,6 +201,8 @@ function safeQuery(
   })
 }
 
+// ─── Metric builders ──────────────────────────────────────────────────────────
+
 function buildSimpleMetric(name: string, data: SegResult) {
   const { series, values } = data
   const n = values.length
@@ -143,15 +218,9 @@ function buildSimpleMetric(name: string, data: SegResult) {
   }
 }
 
-function buildSplitMetric(
-  name: string,
-  playerData: SegResult,
-  staffData: SegResult
-) {
-  // Use player series as the reference; fall back to staff if player is empty
+function buildSplitMetric(name: string, playerData: SegResult, staffData: SegResult) {
   const series = playerData.series.length > 0 ? playerData.series : staffData.series
   const n = series.length
-
   const pVals = playerData.values.length === n ? playerData.values : new Array(n).fill(0) as number[]
   const sVals = staffData.values.length === n ? staffData.values : new Array(n).fill(0) as number[]
   const totalVals = series.map((_, i) => (pVals[i] ?? 0) + (sVals[i] ?? 0))
@@ -186,16 +255,13 @@ function buildSplitMetric(
 function buildConversionRate(rawFunnel: FunnelResult) {
   const { series, stepCounts } = rawFunnel
   const n = stepCounts.length
-
   const rates = stepCounts.map((steps) => {
     const signUps = steps[0] ?? 0
     const subs = steps[1] ?? 0
-    return signUps > 0 ? Math.round((subs / signUps) * 1000) / 10 : 0
+    return signUps > 0 ? round1((subs / signUps) * 100) : 0
   })
-
   const thisWeek = n > 0 ? rates[n - 1] : 0
   const previousWeek = n > 1 ? rates[n - 2] : 0
-
   return {
     thisWeek,
     previousWeek,
@@ -206,6 +272,115 @@ function buildConversionRate(rawFunnel: FunnelResult) {
     })),
   }
 }
+
+function buildFeatureAdoption(
+  wauBreakdown: BreakdownResult,
+  featureResults: SegResult[],
+) {
+  // Extract premium WAU series — breakdown key may be 'true' or the boolean string
+  const premiumWAUValues: number[] =
+    wauBreakdown.breakdown['true'] ??
+    wauBreakdown.breakdown['True'] ??
+    new Array(wauBreakdown.series.length).fill(0)
+  const wauSeries = wauBreakdown.series
+
+  // Align feature series to WAU series by date
+  const partial = isPartialWeek(premiumWAUValues)
+  const effectiveN = partial ? premiumWAUValues.length - 1 : premiumWAUValues.length
+
+  // Current and previous week indices
+  const curr = effectiveN - 1
+  const prev = effectiveN - 2
+
+  const premiumWAU = curr >= 0 ? premiumWAUValues[curr] : 0
+
+  const features = FEATURE_EVENTS.map(({ name, color }, fi) => {
+    const raw = featureResults[fi]
+
+    // Build per-week values aligned to WAU series
+    const featureDateMap: Record<string, number> = {}
+    raw.series.forEach((d, i) => { featureDateMap[d] = raw.values[i] ?? 0 })
+    const featureValues = wauSeries.map((d) => featureDateMap[d] ?? 0)
+
+    const adoptionRates = featureValues.map((users, i) => {
+      const wau = premiumWAUValues[i] ?? 0
+      return wau > 0 ? round1((users / wau) * 100) : null
+    })
+
+    const thisWeekUsers = curr >= 0 ? featureValues[curr] : 0
+    const prevWeekUsers = prev >= 0 ? featureValues[prev] : 0
+    const adoptionPct = curr >= 0 ? adoptionRates[curr] : null
+    const adoptionPctPrev = prev >= 0 ? adoptionRates[prev] : null
+
+    const history = wauSeries.map((date, i) => ({
+      week: formatWeekLabel(date.split('T')[0]),
+      users: featureValues[i],
+      adoptionPct: adoptionRates[i],
+    }))
+
+    return {
+      name,
+      color,
+      thisWeek: thisWeekUsers,
+      previousWeek: prevWeekUsers,
+      growthPct: calcGrowth(thisWeekUsers, prevWeekUsers),
+      adoptionPct,
+      adoptionPctPrev,
+      adoptionGrowthPct: adoptionPct !== null && adoptionPctPrev !== null
+        ? calcGrowth(adoptionPct, adoptionPctPrev)
+        : null,
+      history,
+    }
+  })
+
+  return { premiumWAU, features }
+}
+
+// ─── AI Insight ───────────────────────────────────────────────────────────────
+
+async function generateInsight(
+  features: ReturnType<typeof buildFeatureAdoption>['features'],
+  premiumWAU: number
+): Promise<string | null> {
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) return null
+
+  try {
+    const lines = features
+      .filter((f) => f.adoptionPct !== null)
+      .map((f) => {
+        const wow = f.adoptionGrowthPct !== null ? `, ${f.adoptionGrowthPct > 0 ? '+' : ''}${f.adoptionGrowthPct}% WoW` : ''
+        return `- ${f.name}: ${f.thisWeek} unique users, ${f.adoptionPct}% of Premium WAU${wow}`
+      })
+      .join('\n')
+
+    const userMessage =
+      `Here is this week's feature adoption data for Premium users (ep_premium_access = true):\n\n` +
+      `${lines}\n` +
+      `- Premium WAU (total active Premium users): ${premiumWAU}\n\n` +
+      `Write a 2-3 sentence summary of what these numbers mean this week.`
+
+    const client = new Anthropic({ apiKey })
+    const msg = await client.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 300,
+      system:
+        'You are a product analytics assistant for Elite Prospects, a hockey player database and recruitment platform. ' +
+        'Write a 2-3 sentence weekly insight summarising feature adoption among Premium users. ' +
+        'Be direct and specific. Focus on what\'s notable — highest adoption, fastest growth, biggest drop, or lowest engagement worth flagging. ' +
+        'No filler phrases. No bullet points. Plain prose only.',
+      messages: [{ role: 'user', content: userMessage }],
+    })
+
+    const block = msg.content[0]
+    return block.type === 'text' ? block.text : null
+  } catch (err) {
+    console.error('Anthropic insight failed:', err)
+    return null
+  }
+}
+
+// ─── Route handler ────────────────────────────────────────────────────────────
 
 export async function GET() {
   const username = process.env.MIXPANEL_SERVICE_ACCOUNT_USERNAME
@@ -219,13 +394,13 @@ export async function GET() {
 
   // Dynamic date range: 9 completed weeks ending last Sunday
   const today = new Date()
-  const dow = today.getDay() // 0=Sun
+  const dow = today.getDay()
   const daysToLastSunday = dow === 0 ? 7 : dow
   const lastSunday = new Date(today)
   lastSunday.setDate(today.getDate() - daysToLastSunday)
 
   const fromDate = new Date(lastSunday)
-  fromDate.setDate(lastSunday.getDate() - 62) // Monday of the oldest week
+  fromDate.setDate(lastSunday.getDate() - 62)
 
   const toDate = toDateStr(lastSunday)
   const fromDateStr = toDateStr(fromDate)
@@ -238,74 +413,74 @@ export async function GET() {
   const VERIF_STAFF_FILTER  = 'properties["staffId"] > 0'
   const EDIT_PLAYER_FILTER  = 'properties["player"] > 0'
   const EDIT_STAFF_FILTER   = 'properties["staff"] > 0'
+  const emptyFunnel         = { series: [], stepCounts: [] as number[][] }
+  const emptyBreakdown      = { series: [], breakdown: {} }
 
-  const emptyFunnel = { series: [], stepCounts: [] as number[][] }
-
-  const [results, rawOnboarding, rawConversion] = await Promise.all([
+  const [results, rawOnboarding, rawConversion, wauBreakdown, ...featureResults] = await Promise.all([
     Promise.all([
-      safeQuery(auth, '$session_start', fromDateStr, toDate, 'unique'),
-      safeQuery(auth, 'Subscription Started', fromDateStr, toDate, 'general'),
-      safeQuery(auth, 'Requested Verification', fromDateStr, toDate, 'unique', VERIF_PLAYER_FILTER),
-      safeQuery(auth, 'Requested Verification', fromDateStr, toDate, 'unique', VERIF_STAFF_FILTER),
-      safeQuery(auth, 'Profile Edit Section Saved', fromDateStr, toDate, 'unique', EDIT_PLAYER_FILTER),
-      safeQuery(auth, 'Profile Edit Section Saved', fromDateStr, toDate, 'unique', EDIT_STAFF_FILTER),
-      safeQuery(auth, 'Visited My Feed', fromDateStr, toDate, 'general'),
-      safeQuery(auth, 'Viewed Video', fromDateStr, toDate, 'general'),
-      safeQuery(auth, 'Message sent', fromDateStr, toDate, 'general'),
-      safeQuery(auth, 'Add Player to Watchlist', fromDateStr, toDate, 'general'),
+      safeQuery(auth, '$session_start',              fromDateStr, toDate, 'unique'),
+      safeQuery(auth, 'Subscription Started',        fromDateStr, toDate, 'general'),
+      safeQuery(auth, 'Requested Verification',      fromDateStr, toDate, 'unique', VERIF_PLAYER_FILTER),
+      safeQuery(auth, 'Requested Verification',      fromDateStr, toDate, 'unique', VERIF_STAFF_FILTER),
+      safeQuery(auth, 'Profile Edit Section Saved',  fromDateStr, toDate, 'unique', EDIT_PLAYER_FILTER),
+      safeQuery(auth, 'Profile Edit Section Saved',  fromDateStr, toDate, 'unique', EDIT_STAFF_FILTER),
+      safeQuery(auth, 'Visited My Feed',             fromDateStr, toDate, 'general'),
+      safeQuery(auth, 'Viewed Video',                fromDateStr, toDate, 'general'),
+      safeQuery(auth, 'Message sent',                fromDateStr, toDate, 'general'),
+      safeQuery(auth, 'Add Player to Watchlist',     fromDateStr, toDate, 'general'),
     ]),
     queryFunnel(auth, ONBOARDING_FUNNEL_ID, fromDateStr, toDate).catch((err) => {
-      console.error('Onboarding funnel query failed:', err)
-      return emptyFunnel
+      console.error('Onboarding funnel failed:', err); return emptyFunnel
     }),
     queryFunnel(auth, CONVERSION_FUNNEL_ID, fromDateStr, toDate).catch((err) => {
-      console.error('Conversion funnel query failed:', err)
-      return emptyFunnel
+      console.error('Conversion funnel failed:', err); return emptyFunnel
     }),
+    // Premium WAU — breakdown by ep_premium_access (filter approach returns zero for $session_start)
+    queryMixpanelBreakdown(auth, '$session_start', fromDateStr, toDate, PREMIUM_BREAKDOWN_ON).catch((err) => {
+      console.error('WAU breakdown failed:', err); return emptyBreakdown
+    }),
+    // Feature adoption — user property filter works correctly on these events
+    ...FEATURE_EVENTS.map(({ event }) =>
+      safeQuery(auth, event, fromDateStr, toDate, 'unique', PREMIUM_USER_FILTER)
+    ),
   ])
 
   const [
-    wau,           // Weekly Active Users
-    subscriptions, // New Subscriptions
-    verifPlayer,   // New Verification Requests — player
-    verifStaff,    // New Verification Requests — staff
-    editPlayer,    // Profile Edits Saved — player
-    editStaff,     // Profile Edits Saved — staff
-    feedVisits,    // Feed Visits
-    videoViews,    // Video Views
-    messages,      // Messages Sent
-    watchlisted,   // Players Watchlisted
+    wau, subscriptions,
+    verifPlayer, verifStaff,
+    editPlayer, editStaff,
+    feedVisits, videoViews, messages, watchlisted,
   ] = results
 
+  // ── Onboarding funnel ────────────────────────────────────────────────────
   const FUNNEL_STEP_NAMES = [
     'Visited Sign Up', 'Sign Up',
     'Onboarding Step 1', 'Onboarding Step 2', 'Onboarding Step 3', 'Onboarding Step 4',
   ]
-  const n = rawOnboarding.stepCounts.length
+  const fn = rawOnboarding.stepCounts.length
   const funnelSteps = FUNNEL_STEP_NAMES.map((name, i) => {
-    const thisWeek = n > 0 ? (rawOnboarding.stepCounts[n - 1]?.[i] ?? 0) : 0
-    const previousWeek = n > 1 ? (rawOnboarding.stepCounts[n - 2]?.[i] ?? 0) : 0
+    const thisWeek    = fn > 0 ? (rawOnboarding.stepCounts[fn - 1]?.[i] ?? 0) : 0
+    const previousWeek = fn > 1 ? (rawOnboarding.stepCounts[fn - 2]?.[i] ?? 0) : 0
     const history = rawOnboarding.series.map((date, wi) => ({
       week: formatWeekLabel(date.split('T')[0]),
       value: rawOnboarding.stepCounts[wi]?.[i] ?? 0,
     }))
     return { name, thisWeek, previousWeek, growthPct: calcGrowth(thisWeek, previousWeek), split: null, history }
   })
-
-  const signUpWeek = funnelSteps[1].thisWeek
-  const completedWeek = funnelSteps[5].thisWeek
-  const activationRate = signUpWeek > 0
-    ? Math.round((completedWeek / signUpWeek) * 1000) / 10
+  const activationRate = funnelSteps[1].thisWeek > 0
+    ? round1((funnelSteps[5].thisWeek / funnelSteps[1].thisWeek) * 100)
     : null
 
-  const funnel = { steps: funnelSteps, activationRate }
-  const conversionRate = buildConversionRate(rawConversion)
+  // ── Feature adoption ─────────────────────────────────────────────────────
+  const { premiumWAU, features } = buildFeatureAdoption(wauBreakdown, featureResults)
+  const insight = await generateInsight(features, premiumWAU)
 
-  const payload = {
+  return Response.json({
     generatedAt: new Date().toISOString(),
     weekLabel,
-    conversionRate,
-    funnel,
+    conversionRate: buildConversionRate(rawConversion),
+    funnel: { steps: funnelSteps, activationRate },
+    featureAdoption: { premiumWAU, features, insight },
     groups: [
       {
         name: 'General',
@@ -331,7 +506,5 @@ export async function GET() {
         ],
       },
     ],
-  }
-
-  return Response.json(payload)
+  })
 }
