@@ -41,6 +41,21 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms))
 }
 
+// Mixpanel allows max 5 concurrent queries per service account.
+// Run all tasks through a pool to avoid hitting that limit.
+async function runConcurrent<T>(tasks: (() => Promise<T>)[], limit = 4): Promise<T[]> {
+  const results: T[] = new Array(tasks.length)
+  let next = 0
+  async function worker() {
+    while (next < tasks.length) {
+      const i = next++
+      results[i] = await tasks[i]()
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker))
+  return results
+}
+
 function toDateStr(d: Date): string {
   return d.toISOString().split('T')[0]
 }
@@ -416,41 +431,46 @@ export async function GET() {
   const emptyFunnel         = { series: [], stepCounts: [] as number[][] }
   const emptyBreakdown      = { series: [], breakdown: {} }
 
-  const [results, rawOnboarding, rawConversion, wauBreakdown, ...featureResults] = await Promise.all([
-    Promise.all([
-      safeQuery(auth, '$session_start',              fromDateStr, toDate, 'unique'),
-      safeQuery(auth, 'Subscription Started',        fromDateStr, toDate, 'general'),
-      safeQuery(auth, 'Requested Verification',      fromDateStr, toDate, 'unique', VERIF_PLAYER_FILTER),
-      safeQuery(auth, 'Requested Verification',      fromDateStr, toDate, 'unique', VERIF_STAFF_FILTER),
-      safeQuery(auth, 'Profile Edit Section Saved',  fromDateStr, toDate, 'unique', EDIT_PLAYER_FILTER),
-      safeQuery(auth, 'Profile Edit Section Saved',  fromDateStr, toDate, 'unique', EDIT_STAFF_FILTER),
-      safeQuery(auth, 'Visited My Feed',             fromDateStr, toDate, 'general'),
-      safeQuery(auth, 'Viewed Video',                fromDateStr, toDate, 'general'),
-      safeQuery(auth, 'Message sent',                fromDateStr, toDate, 'general'),
-      safeQuery(auth, 'Add Player to Watchlist',     fromDateStr, toDate, 'general'),
-    ]),
-    queryFunnel(auth, ONBOARDING_FUNNEL_ID, fromDateStr, toDate).catch((err) => {
-      console.error('Onboarding funnel failed:', err); return emptyFunnel
-    }),
-    queryFunnel(auth, CONVERSION_FUNNEL_ID, fromDateStr, toDate).catch((err) => {
-      console.error('Conversion funnel failed:', err); return emptyFunnel
-    }),
-    // Premium WAU — breakdown by ep_premium_access (filter approach returns zero for $session_start)
-    queryMixpanelBreakdown(auth, '$session_start', fromDateStr, toDate, PREMIUM_BREAKDOWN_ON).catch((err) => {
-      console.error('WAU breakdown failed:', err); return emptyBreakdown
-    }),
-    // Feature adoption — user property filter works correctly on these events
-    ...FEATURE_EVENTS.map(({ event }) =>
-      safeQuery(auth, event, fromDateStr, toDate, 'unique', PREMIUM_USER_FILTER)
-    ),
-  ])
-
+  // Run all 17 queries through a 4-concurrency pool to stay under Mixpanel's
+  // 5 concurrent-query limit and avoid 429s causing zeros in charts.
   const [
     wau, subscriptions,
     verifPlayer, verifStaff,
     editPlayer, editStaff,
     feedVisits, videoViews, messages, watchlisted,
-  ] = results
+    rawOnboarding, rawConversion,
+    wauBreakdown,
+    ...featureResults
+  ] = await runConcurrent([
+    () => safeQuery(auth, '$session_start',             fromDateStr, toDate, 'unique'),
+    () => safeQuery(auth, 'Subscription Started',       fromDateStr, toDate, 'general'),
+    () => safeQuery(auth, 'Requested Verification',     fromDateStr, toDate, 'unique', VERIF_PLAYER_FILTER),
+    () => safeQuery(auth, 'Requested Verification',     fromDateStr, toDate, 'unique', VERIF_STAFF_FILTER),
+    () => safeQuery(auth, 'Profile Edit Section Saved', fromDateStr, toDate, 'unique', EDIT_PLAYER_FILTER),
+    () => safeQuery(auth, 'Profile Edit Section Saved', fromDateStr, toDate, 'unique', EDIT_STAFF_FILTER),
+    () => safeQuery(auth, 'Visited My Feed',            fromDateStr, toDate, 'general'),
+    () => safeQuery(auth, 'Viewed Video',               fromDateStr, toDate, 'general'),
+    () => safeQuery(auth, 'Message sent',               fromDateStr, toDate, 'general'),
+    () => safeQuery(auth, 'Add Player to Watchlist',    fromDateStr, toDate, 'general'),
+    () => queryFunnel(auth, ONBOARDING_FUNNEL_ID, fromDateStr, toDate).catch((err) => {
+      console.error('Onboarding funnel failed:', err); return emptyFunnel
+    }),
+    () => queryFunnel(auth, CONVERSION_FUNNEL_ID, fromDateStr, toDate).catch((err) => {
+      console.error('Conversion funnel failed:', err); return emptyFunnel
+    }),
+    () => queryMixpanelBreakdown(auth, '$session_start', fromDateStr, toDate, PREMIUM_BREAKDOWN_ON).catch((err) => {
+      console.error('WAU breakdown failed:', err); return emptyBreakdown
+    }),
+    ...FEATURE_EVENTS.map(({ event }) =>
+      () => safeQuery(auth, event, fromDateStr, toDate, 'unique', PREMIUM_USER_FILTER)
+    ),
+  ] as Array<() => Promise<SegResult | FunnelResult | BreakdownResult>>) as [
+    SegResult, SegResult, SegResult, SegResult, SegResult, SegResult,
+    SegResult, SegResult, SegResult, SegResult,
+    FunnelResult, FunnelResult,
+    BreakdownResult,
+    ...SegResult[]
+  ]
 
   // ── Onboarding funnel ────────────────────────────────────────────────────
   const FUNNEL_STEP_NAMES = [
