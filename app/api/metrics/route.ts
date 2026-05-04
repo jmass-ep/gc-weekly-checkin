@@ -1,4 +1,4 @@
-export const dynamic = 'force-dynamic'
+export const revalidate = 1800 // 30-minute server-side cache via Next.js Data Cache
 
 const PROJECT_ID = '2874875'
 const BASE_URL = 'https://eu.mixpanel.com/api/query/segmentation'
@@ -30,7 +30,7 @@ async function queryFunnel(
 
   const res = await fetch(`${FUNNEL_URL}?${params}`, {
     headers: { Authorization: `Basic ${auth}` },
-    cache: 'no-store',
+    next: { revalidate: 1800 },
   })
 
   if (res.status === 429 && attempt < 2) {
@@ -95,7 +95,7 @@ async function queryMixpanel(
 
   const res = await fetch(`${BASE_URL}?${params}`, {
     headers: { Authorization: `Basic ${auth}` },
-    cache: 'no-store',
+    next: { revalidate: 1800 },
   })
 
   if (res.status === 429 && attempt < 2) {
@@ -333,9 +333,5 @@ export async function GET() {
     ],
   }
 
-  return Response.json(payload, {
-    headers: {
-      'Cache-Control': 's-maxage=1800, stale-while-revalidate=86400',
-    },
-  })
+  return Response.json(payload)
 }
