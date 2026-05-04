@@ -8,6 +8,7 @@ import {
   YAxis,
   Tooltip,
   ResponsiveContainer,
+  LabelList,
 } from 'recharts'
 
 interface SimplePoint {
@@ -47,9 +48,23 @@ interface GroupData {
   metrics: MetricData[]
 }
 
+interface FunnelData {
+  steps: MetricData[]
+  activationRate: number | null
+}
+
+interface ConversionRateData {
+  thisWeek: number
+  previousWeek: number
+  growthPct: number | null
+  history: SimplePoint[]
+}
+
 interface DashboardData {
   generatedAt: string
   weekLabel: string
+  conversionRate: ConversionRateData
+  funnel: FunnelData
   groups: GroupData[]
 }
 
@@ -153,7 +168,7 @@ function SkeletonCard() {
 }
 
 const SKELETON_GROUPS = [
-  { name: 'General', count: 2 },
+  { name: 'General', count: 3 },
   { name: 'Player / Staff', count: 2 },
   { name: 'Habit Building', count: 4 },
 ]
@@ -282,6 +297,104 @@ function LoadingScreen({ visible }: { visible: boolean }) {
   )
 }
 
+function FunnelCard({ funnel }: { funnel: FunnelData }) {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
+
+  const chartData = funnel.steps.map((s) => ({ name: s.name, value: s.thisWeek }))
+
+  return (
+    <div className="bg-white border border-[#E2E8F0] rounded-xl p-5">
+      <div className="flex items-start justify-between mb-6">
+        <p className="text-sm font-semibold text-[#0D2137] leading-snug">Onboarding Funnel</p>
+        <div className="text-right">
+          <span className="text-5xl font-bold text-[#1A202C] tabular-nums leading-none">
+            {funnel.activationRate !== null ? `${funnel.activationRate.toFixed(1)}%` : '—'}
+          </span>
+          <p className="text-xs text-[#64748B] mt-1">Sign Up → Completed Onboarding</p>
+        </div>
+      </div>
+      {mounted && (
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart
+            layout="vertical"
+            data={chartData}
+            margin={{ top: 0, right: 64, bottom: 0, left: 0 }}
+            barCategoryGap="28%"
+          >
+            <XAxis type="number" hide />
+            <YAxis
+              type="category"
+              dataKey="name"
+              tick={{ fontSize: 11, fill: '#64748B' }}
+              axisLine={false}
+              tickLine={false}
+              width={130}
+            />
+            <Bar dataKey="value" fill="#0D2137" radius={[0, 4, 4, 0]} barSize={20}>
+              <LabelList
+                dataKey="value"
+                position="right"
+                formatter={(v: unknown) => typeof v === 'number' ? v.toLocaleString() : String(v)}
+                style={{ fontSize: 11, fill: '#64748B' }}
+              />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      )}
+    </div>
+  )
+}
+
+function ConversionRateCard({ data: cr }: { data: ConversionRateData }) {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
+
+  return (
+    <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 flex flex-col gap-3">
+      <p className="text-sm font-semibold text-[#0D2137] leading-snug">Free to Paid Conversion</p>
+
+      <div className="flex flex-col gap-0.5">
+        <span className="text-3xl font-bold text-[#1A202C] tabular-nums leading-tight">
+          {cr.thisWeek > 0 ? `${cr.thisWeek.toFixed(1)}%` : '—'}
+        </span>
+        <GrowthBadge pct={cr.growthPct} />
+      </div>
+
+      <div className="h-32">
+        {mounted && (
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart
+              data={cr.history}
+              margin={{ top: 2, right: 0, bottom: 0, left: 0 }}
+              barCategoryGap="25%"
+            >
+              <XAxis
+                dataKey="week"
+                tick={{ fontSize: 9, fill: '#64748B' }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis hide />
+              <Tooltip
+                formatter={(v) => typeof v === 'number' ? `${v.toFixed(1)}%` : String(v)}
+                labelFormatter={(label) => `Week of ${label}`}
+                contentStyle={{
+                  fontSize: 12,
+                  border: '1px solid #E2E8F0',
+                  borderRadius: 6,
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                }}
+              />
+              <Bar dataKey="value" fill="#0D2137" radius={[2, 2, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -397,7 +510,7 @@ export default function DashboardPage() {
                 </section>
               ))
             ) : data ? (
-              data.groups.map((group) => (
+              data.groups.map((group, gi) => (
                 <section key={group.name}>
                   <h2
                     className="text-xs font-bold uppercase tracking-widest text-[#0D2137] pl-3 mb-4"
@@ -409,10 +522,26 @@ export default function DashboardPage() {
                     {group.metrics.map((metric) => (
                       <MetricCard key={metric.name} metric={metric} />
                     ))}
+                    {gi === 0 && data.conversionRate && (
+                      <ConversionRateCard data={data.conversionRate} />
+                    )}
                   </div>
                 </section>
               ))
             ) : null}
+
+            {/* Activation funnel */}
+            {data?.funnel && (
+              <section>
+                <h2
+                  className="text-xs font-bold uppercase tracking-widest text-[#0D2137] pl-3 mb-4"
+                  style={{ borderLeft: '3px solid #C8102E' }}
+                >
+                  Activation
+                </h2>
+                <FunnelCard funnel={data.funnel} />
+              </section>
+            )}
           </main>
         )}
 
