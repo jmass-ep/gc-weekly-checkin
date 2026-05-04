@@ -1,5 +1,4 @@
-export const revalidate = 1800 // 30-minute server-side cache via Next.js Data Cache
-
+import { unstable_cache } from 'next/cache'
 import Anthropic from '@anthropic-ai/sdk'
 
 const PROJECT_ID = '2874875'
@@ -107,7 +106,7 @@ async function queryMixpanel(
 
   const res = await fetch(`${BASE_URL}?${params}`, {
     headers: { Authorization: `Basic ${auth}` },
-    next: { revalidate: 1800 },
+    cache: 'no-store',
   })
 
   if (res.status === 429 && attempt < 2) {
@@ -145,7 +144,7 @@ async function queryMixpanelBreakdown(
 
   const res = await fetch(`${BASE_URL}?${params}`, {
     headers: { Authorization: `Basic ${auth}` },
-    next: { revalidate: 1800 },
+    cache: 'no-store',
   })
 
   if (res.status === 429 && attempt < 2) {
@@ -184,7 +183,7 @@ async function queryFunnel(
 
   const res = await fetch(`${FUNNEL_URL}?${params}`, {
     headers: { Authorization: `Basic ${auth}` },
-    next: { revalidate: 1800 },
+    cache: 'no-store',
   })
 
   if (res.status === 429 && attempt < 2) {
@@ -395,35 +394,9 @@ async function generateInsight(
   }
 }
 
-// ─── Route handler ────────────────────────────────────────────────────────────
+// ─── Cached computation ───────────────────────────────────────────────────────
 
-export async function GET() {
-  const username = process.env.MIXPANEL_SERVICE_ACCOUNT_USERNAME
-  const secret = process.env.MIXPANEL_SERVICE_ACCOUNT_SECRET
-
-  if (!username || !secret) {
-    return Response.json({ error: 'missing_credentials' })
-  }
-
-  const auth = Buffer.from(`${username}:${secret}`).toString('base64')
-
-  // Dynamic date range: 9 completed weeks ending last Sunday
-  const today = new Date()
-  const dow = today.getDay()
-  const daysToLastSunday = dow === 0 ? 7 : dow
-  const lastSunday = new Date(today)
-  lastSunday.setDate(today.getDate() - daysToLastSunday)
-
-  const fromDate = new Date(lastSunday)
-  fromDate.setDate(lastSunday.getDate() - 62)
-
-  const toDate = toDateStr(lastSunday)
-  const fromDateStr = toDateStr(fromDate)
-
-  const weekStart = new Date(lastSunday)
-  weekStart.setDate(lastSunday.getDate() - 6)
-  const weekLabel = `${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${lastSunday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${lastSunday.getFullYear()}`
-
+async function computeMetrics(auth: string, fromDateStr: string, toDate: string, weekLabel: string) {
   const VERIF_PLAYER_FILTER = 'properties["playerId"] > 0'
   const VERIF_STAFF_FILTER  = 'properties["staffId"] > 0'
   const EDIT_PLAYER_FILTER  = 'properties["player"] > 0'
@@ -431,7 +404,7 @@ export async function GET() {
   const emptyFunnel         = { series: [], stepCounts: [] as number[][] }
   const emptyBreakdown      = { series: [], breakdown: {} }
 
-  // Run all 17 queries through a 4-concurrency pool to stay under Mixpanel's
+  // Run all queries through a 4-concurrency pool to stay under Mixpanel's
   // 5 concurrent-query limit and avoid 429s causing zeros in charts.
   const [
     wau, subscriptions,
@@ -479,7 +452,7 @@ export async function GET() {
   ]
   const fn = rawOnboarding.stepCounts.length
   const funnelSteps = FUNNEL_STEP_NAMES.map((name, i) => {
-    const thisWeek    = fn > 0 ? (rawOnboarding.stepCounts[fn - 1]?.[i] ?? 0) : 0
+    const thisWeek     = fn > 0 ? (rawOnboarding.stepCounts[fn - 1]?.[i] ?? 0) : 0
     const previousWeek = fn > 1 ? (rawOnboarding.stepCounts[fn - 2]?.[i] ?? 0) : 0
     const history = rawOnboarding.series.map((date, wi) => ({
       week: formatWeekLabel(date.split('T')[0]),
@@ -495,7 +468,7 @@ export async function GET() {
   const { premiumWAU, features } = buildFeatureAdoption(wauBreakdown, featureResults)
   const insight = await generateInsight(features, premiumWAU)
 
-  return Response.json({
+  return {
     generatedAt: new Date().toISOString(),
     weekLabel,
     conversionRate: buildConversionRate(rawConversion),
@@ -526,5 +499,47 @@ export async function GET() {
         ],
       },
     ],
-  })
+  }
+}
+
+// ─── Route handler ────────────────────────────────────────────────────────────
+
+export async function GET() {
+  const username = process.env.MIXPANEL_SERVICE_ACCOUNT_USERNAME
+  const secret = process.env.MIXPANEL_SERVICE_ACCOUNT_SECRET
+
+  if (!username || !secret) {
+    return Response.json({ error: 'missing_credentials' })
+  }
+
+  const auth = Buffer.from(`${username}:${secret}`).toString('base64')
+
+  // Dynamic date range: 9 completed weeks ending last Sunday
+  const today = new Date()
+  const dow = today.getDay()
+  const daysToLastSunday = dow === 0 ? 7 : dow
+  const lastSunday = new Date(today)
+  lastSunday.setDate(today.getDate() - daysToLastSunday)
+
+  const fromDate = new Date(lastSunday)
+  fromDate.setDate(lastSunday.getDate() - 62)
+
+  const toDate = toDateStr(lastSunday)
+  const fromDateStr = toDateStr(fromDate)
+
+  const weekStart = new Date(lastSunday)
+  weekStart.setDate(lastSunday.getDate() - 6)
+  const weekLabel = `${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${lastSunday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${lastSunday.getFullYear()}`
+
+  // unstable_cache persists the fully-computed payload in Next.js Data Cache,
+  // which IS durable across Vercel serverless instances (unlike next: { revalidate }).
+  // The cache key includes the date range so stale entries are never served after a week rolls over.
+  const getCached = unstable_cache(
+    () => computeMetrics(auth, fromDateStr, toDate, weekLabel),
+    [`metrics-${fromDateStr}-${toDate}`],
+    { revalidate: 1800 }
+  )
+
+  const payload = await getCached()
+  return Response.json(payload)
 }
