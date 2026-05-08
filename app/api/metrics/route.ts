@@ -217,14 +217,17 @@ function safeQuery(
 
 // ─── Metric builders ──────────────────────────────────────────────────────────
 
-function buildSimpleMetric(name: string, data: SegResult) {
+// Returns the last value in a SegResult (the most recent week's count).
+function lastVal(r: SegResult): number {
+  return r.values.length > 0 ? r.values[r.values.length - 1] : 0
+}
+
+function buildSimpleMetric(name: string, data: SegResult, yoyValue: number | null = null) {
   const { series, values } = data
   const n = values.length
   const thisWeek = n > 0 ? values[n - 1] : 0
   const previousWeek = n > 1 ? values[n - 2] : 0
-  const yoyPct = n >= 53 ? calcGrowth(thisWeek, values[n - 53]) : null
-  const recentSeries = series.slice(-9)
-  const recentValues = values.slice(-9)
+  const yoyPct = yoyValue !== null ? calcGrowth(thisWeek, yoyValue) : null
   return {
     name,
     thisWeek,
@@ -232,11 +235,11 @@ function buildSimpleMetric(name: string, data: SegResult) {
     growthPct: calcGrowth(thisWeek, previousWeek),
     yoyPct,
     split: null,
-    history: recentSeries.map((date, i) => ({ week: formatWeekLabel(date), value: recentValues[i] })),
+    history: series.map((date, i) => ({ week: formatWeekLabel(date), value: values[i] })),
   }
 }
 
-function buildSplitMetric(name: string, playerData: SegResult, staffData: SegResult) {
+function buildSplitMetric(name: string, playerData: SegResult, staffData: SegResult, yoyValue: number | null = null) {
   const series = playerData.series.length > 0 ? playerData.series : staffData.series
   const n = series.length
   const pVals = playerData.values.length === n ? playerData.values : new Array(n).fill(0) as number[]
@@ -245,22 +248,18 @@ function buildSplitMetric(name: string, playerData: SegResult, staffData: SegRes
 
   const thisWeek = n > 0 ? totalVals[n - 1] : 0
   const previousWeek = n > 1 ? totalVals[n - 2] : 0
-  const yoyPct = n >= 53 ? calcGrowth(thisWeek, totalVals[n - 53]) : null
+  const yoyPct = yoyValue !== null ? calcGrowth(thisWeek, yoyValue) : null
   const pThis = n > 0 ? pVals[n - 1] : 0
   const pPrev = n > 1 ? pVals[n - 2] : 0
   const sThis = n > 0 ? sVals[n - 1] : 0
   const sPrev = n > 1 ? sVals[n - 2] : 0
 
-  const recentSeries = series.slice(-9)
-  const history = recentSeries.map((date, i) => {
-    const idx = n - recentSeries.length + i
-    return {
-      week: formatWeekLabel(date),
-      player: pVals[idx] ?? 0,
-      staff: sVals[idx] ?? 0,
-      value: (pVals[idx] ?? 0) + (sVals[idx] ?? 0),
-    }
-  })
+  const history = series.map((date, i) => ({
+    week: formatWeekLabel(date),
+    player: pVals[i] ?? 0,
+    staff: sVals[i] ?? 0,
+    value: (pVals[i] ?? 0) + (sVals[i] ?? 0),
+  }))
 
   return {
     name,
@@ -276,7 +275,7 @@ function buildSplitMetric(name: string, playerData: SegResult, staffData: SegRes
   }
 }
 
-function buildConversionRate(rawFunnel: FunnelResult) {
+function buildConversionRate(rawFunnel: FunnelResult, yoyValue: number | null = null) {
   const { series, stepCounts } = rawFunnel
   const n = stepCounts.length
   const rates = stepCounts.map((steps) => {
@@ -286,17 +285,15 @@ function buildConversionRate(rawFunnel: FunnelResult) {
   })
   const thisWeek = n > 0 ? rates[n - 1] : 0
   const previousWeek = n > 1 ? rates[n - 2] : 0
-  const yoyPct = n >= 53 ? calcGrowth(thisWeek, rates[n - 53]) : null
-  const recentSeries = series.slice(-9)
-  const recentRates = rates.slice(-9)
+  const yoyPct = yoyValue !== null ? calcGrowth(thisWeek, yoyValue) : null
   return {
     thisWeek,
     previousWeek,
     growthPct: calcGrowth(thisWeek, previousWeek),
     yoyPct,
-    history: recentSeries.map((date, i) => ({
+    history: series.map((date, i) => ({
       week: formatWeekLabel(date.split('T')[0]),
-      value: recentRates[i],
+      value: rates[i],
     })),
   }
 }
@@ -304,6 +301,7 @@ function buildConversionRate(rawFunnel: FunnelResult) {
 function buildFeatureAdoption(
   wauBreakdown: BreakdownResult,
   featureResults: SegResult[],
+  yoyFeatureResults: SegResult[] = [],
 ) {
   // Extract premium WAU series — breakdown key may be 'true' or the boolean string
   const premiumWAUValues: number[] =
@@ -345,15 +343,13 @@ function buildFeatureAdoption(
     const adoptionPct = curr >= 0 ? adoptionRates[curr] : null
     const adoptionPctPrev = prev >= 0 ? adoptionRates[prev] : null
 
-    const yoyIndex = curr - 52
-    const yoyPct = yoyIndex >= 0 ? calcGrowth(thisWeekUsers, featureValues[yoyIndex]) : null
+    const yoyUsers = yoyFeatureResults[fi] ? lastVal(yoyFeatureResults[fi]) : 0
+    const yoyPct = yoyUsers > 0 ? calcGrowth(thisWeekUsers, yoyUsers) : null
 
-    const recentWauSeries = wauSeries.slice(-9)
-    const recentOffset = wauSeries.length - recentWauSeries.length
-    const history = recentWauSeries.map((date, i) => ({
+    const history = wauSeries.map((date, i) => ({
       week: formatWeekLabel(date.split('T')[0]),
-      users: featureValues[recentOffset + i],
-      adoptionPct: adoptionRates[recentOffset + i],
+      users: featureValues[i],
+      adoptionPct: adoptionRates[i],
     }))
 
     return {
@@ -429,6 +425,15 @@ async function computeMetrics(auth: string, fromDateStr: string, toDate: string,
   const emptyFunnel         = { series: [], stepCounts: [] as number[][] }
   const emptyBreakdown      = { series: [], breakdown: {} }
 
+  // YoY reference window: 7 days ending exactly 52 weeks before toDate
+  const toDateObj = new Date(toDate + 'T00:00:00')
+  const yoyToObj  = new Date(toDateObj)
+  yoyToObj.setDate(toDateObj.getDate() - 364)
+  const yoyFromObj = new Date(yoyToObj)
+  yoyFromObj.setDate(yoyToObj.getDate() - 7)
+  const yoyToStr   = toDateStr(yoyToObj)
+  const yoyFromStr = toDateStr(yoyFromObj)
+
   // Run all queries through a 4-concurrency pool to stay under Mixpanel's
   // 5 concurrent-query limit and avoid 429s causing zeros in charts.
   const [
@@ -470,6 +475,44 @@ async function computeMetrics(auth: string, fromDateStr: string, toDate: string,
     ...SegResult[]
   ]
 
+  // ── YoY reference queries (1 week, 52 weeks ago — tiny, fast) ───────────
+  const [
+    yoyWau, yoySubs,
+    yoyVerifP, yoyVerifS,
+    yoyEditP, yoyEditS,
+    yoyFeed, yoyVid, yoyMsg, yoyWatch,
+    yoyConvFunnel,
+    ...yoyFeatureResults
+  ] = await runConcurrent([
+    () => safeQuery(auth, 'Visited Player Page',         yoyFromStr, yoyToStr, 'unique'),
+    () => safeQuery(auth, 'Subscription Started',        yoyFromStr, yoyToStr, 'general'),
+    () => safeQuery(auth, 'Requested Verification',      yoyFromStr, yoyToStr, 'unique', VERIF_PLAYER_FILTER),
+    () => safeQuery(auth, 'Requested Verification',      yoyFromStr, yoyToStr, 'unique', VERIF_STAFF_FILTER),
+    () => safeQuery(auth, 'Profile Edit Section Saved',  yoyFromStr, yoyToStr, 'unique', EDIT_PLAYER_FILTER),
+    () => safeQuery(auth, 'Profile Edit Section Saved',  yoyFromStr, yoyToStr, 'unique', EDIT_STAFF_FILTER),
+    () => safeQuery(auth, 'Visited My Feed',             yoyFromStr, yoyToStr, 'general'),
+    () => safeQuery(auth, 'Viewed Video',                yoyFromStr, yoyToStr, 'general'),
+    () => safeQuery(auth, 'Message sent',                yoyFromStr, yoyToStr, 'general'),
+    () => safeQuery(auth, 'Add Player to Watchlist',     yoyFromStr, yoyToStr, 'general'),
+    () => queryFunnel(auth, CONVERSION_FUNNEL_ID, yoyFromStr, yoyToStr).catch(() => emptyFunnel),
+    ...FEATURE_EVENTS.map(({ event }) =>
+      () => safeQuery(auth, event, yoyFromStr, yoyToStr, 'unique', PREMIUM_USER_FILTER)
+    ),
+  ] as Array<() => Promise<SegResult | FunnelResult>>) as [
+    SegResult, SegResult, SegResult, SegResult, SegResult, SegResult,
+    SegResult, SegResult, SegResult, SegResult,
+    FunnelResult,
+    ...SegResult[]
+  ]
+
+  // Derive YoY scalar values from the single-week results
+  const yoyConvRate = (() => {
+    const steps = yoyConvFunnel.stepCounts[0] ?? []
+    const signUps = steps[0] ?? 0
+    const subs = steps[1] ?? 0
+    return signUps > 0 ? round1((subs / signUps) * 100) : null
+  })()
+
   // ── Onboarding funnel ────────────────────────────────────────────────────
   const FUNNEL_STEP_NAMES = [
     'Visited Sign Up', 'Sign Up',
@@ -483,44 +526,44 @@ async function computeMetrics(auth: string, fromDateStr: string, toDate: string,
       week: formatWeekLabel(date.split('T')[0]),
       value: rawOnboarding.stepCounts[wi]?.[i] ?? 0,
     }))
-    return { name, thisWeek, previousWeek, growthPct: calcGrowth(thisWeek, previousWeek), split: null, history }
+    return { name, thisWeek, previousWeek, growthPct: calcGrowth(thisWeek, previousWeek), yoyPct: null, split: null, history }
   })
   const activationRate = funnelSteps[1].thisWeek > 0
     ? round1((funnelSteps[5].thisWeek / funnelSteps[1].thisWeek) * 100)
     : null
 
   // ── Feature adoption ─────────────────────────────────────────────────────
-  const { premiumWAU, features } = buildFeatureAdoption(wauBreakdown, featureResults)
+  const { premiumWAU, features } = buildFeatureAdoption(wauBreakdown, featureResults, yoyFeatureResults)
   const insight = await generateInsight(features, premiumWAU)
 
   return {
     generatedAt: new Date().toISOString(),
     weekLabel,
-    conversionRate: buildConversionRate(rawConversion),
+    conversionRate: buildConversionRate(rawConversion, yoyConvRate),
     funnel: { steps: funnelSteps, activationRate },
     featureAdoption: { premiumWAU, features, insight },
     groups: [
       {
         name: 'General',
         metrics: [
-          buildSimpleMetric('Weekly Active Users', wau),
-          buildSimpleMetric('New Subscriptions', subscriptions),
+          buildSimpleMetric('Weekly Active Users', wau, lastVal(yoyWau)),
+          buildSimpleMetric('New Subscriptions', subscriptions, lastVal(yoySubs)),
         ],
       },
       {
         name: 'Player / Staff',
         metrics: [
-          buildSplitMetric('New Verification Requests', verifPlayer, verifStaff),
-          buildSplitMetric('Profile Edits Saved', editPlayer, editStaff),
+          buildSplitMetric('New Verification Requests', verifPlayer, verifStaff, lastVal(yoyVerifP) + lastVal(yoyVerifS)),
+          buildSplitMetric('Profile Edits Saved', editPlayer, editStaff, lastVal(yoyEditP) + lastVal(yoyEditS)),
         ],
       },
       {
         name: 'Habit Building',
         metrics: [
-          buildSimpleMetric('Feed Visits', feedVisits),
-          buildSimpleMetric('Video Views', videoViews),
-          buildSimpleMetric('Messages Sent', messages),
-          buildSimpleMetric('Players Watchlisted', watchlisted),
+          buildSimpleMetric('Feed Visits', feedVisits, lastVal(yoyFeed)),
+          buildSimpleMetric('Video Views', videoViews, lastVal(yoyVid)),
+          buildSimpleMetric('Messages Sent', messages, lastVal(yoyMsg)),
+          buildSimpleMetric('Players Watchlisted', watchlisted, lastVal(yoyWatch)),
         ],
       },
     ],
@@ -547,7 +590,7 @@ export async function GET() {
   lastSunday.setDate(today.getDate() - daysToLastSunday)
 
   const fromDate = new Date(lastSunday)
-  fromDate.setDate(lastSunday.getDate() - 426) // 9 current weeks + 52 prior weeks for YoY
+  fromDate.setDate(lastSunday.getDate() - 62)
 
   const toDate = toDateStr(lastSunday)
   const fromDateStr = toDateStr(fromDate)
