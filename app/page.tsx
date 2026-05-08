@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   BarChart, Bar,
+  ComposedChart,
   LineChart, Line,
   XAxis, YAxis,
   Tooltip, Legend,
@@ -13,6 +14,7 @@ import {
 interface SimplePoint {
   week: string
   value: number
+  lastYear?: number | null
 }
 
 interface SplitPoint {
@@ -20,6 +22,7 @@ interface SplitPoint {
   player: number
   staff: number
   value: number
+  lastYear?: number | null
 }
 
 interface SplitSide {
@@ -65,6 +68,8 @@ interface FeatureHistory {
   week: string
   users: number
   adoptionPct: number | null
+  usersLastYear?: number | null
+  adoptionPctLastYear?: number | null
 }
 
 interface FeatureMetric {
@@ -134,7 +139,7 @@ function MetricCard({ metric, note }: { metric: MetricData; note?: string }) {
       <div className="h-32">
         {mounted && (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart
+            <ComposedChart
               data={metric.history}
               margin={{ top: 2, right: 0, bottom: 0, left: 0 }}
               barCategoryGap="25%"
@@ -147,7 +152,10 @@ function MetricCard({ metric, note }: { metric: MetricData; note?: string }) {
               />
               <YAxis hide />
               <Tooltip
-                formatter={(value) => (typeof value === 'number' ? value.toLocaleString() : String(value))}
+                formatter={(value, name) => [
+                  typeof value === 'number' ? value.toLocaleString() : String(value),
+                  name === 'lastYear' ? 'Last Year' : name === 'value' ? 'This Year' : String(name),
+                ]}
                 labelFormatter={(label) => `Week of ${label}`}
                 contentStyle={{
                   fontSize: 12,
@@ -164,7 +172,16 @@ function MetricCard({ metric, note }: { metric: MetricData; note?: string }) {
               ) : (
                 <Bar dataKey="value" fill="#0D2137" radius={[2, 2, 0, 0]} />
               )}
-            </BarChart>
+              <Line
+                type="monotone"
+                dataKey="lastYear"
+                stroke="#94A3B8"
+                strokeWidth={1.5}
+                strokeDasharray="4 4"
+                dot={false}
+                connectNulls={false}
+              />
+            </ComposedChart>
           </ResponsiveContainer>
         )}
       </div>
@@ -396,7 +413,7 @@ function ConversionRateCard({ data: cr }: { data: ConversionRateData }) {
       <div className="h-32">
         {mounted && (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart
+            <ComposedChart
               data={cr.history}
               margin={{ top: 2, right: 0, bottom: 0, left: 0 }}
               barCategoryGap="25%"
@@ -409,7 +426,10 @@ function ConversionRateCard({ data: cr }: { data: ConversionRateData }) {
               />
               <YAxis hide />
               <Tooltip
-                formatter={(v) => typeof v === 'number' ? `${v.toFixed(1)}%` : String(v)}
+                formatter={(v, name) => [
+                  typeof v === 'number' ? `${Number(v).toFixed(1)}%` : String(v),
+                  name === 'lastYear' ? 'Last Year' : 'This Year',
+                ]}
                 labelFormatter={(label) => `Week of ${label}`}
                 contentStyle={{
                   fontSize: 12,
@@ -419,7 +439,16 @@ function ConversionRateCard({ data: cr }: { data: ConversionRateData }) {
                 }}
               />
               <Bar dataKey="value" fill="#0D2137" radius={[2, 2, 0, 0]} />
-            </BarChart>
+              <Line
+                type="monotone"
+                dataKey="lastYear"
+                stroke="#94A3B8"
+                strokeWidth={1.5}
+                strokeDasharray="4 4"
+                dot={false}
+                connectNulls={false}
+              />
+            </ComposedChart>
           </ResponsiveContainer>
         )}
       </div>
@@ -431,7 +460,7 @@ function FeatureCard({ feature, premiumWAU }: { feature: FeatureMetric; premiumW
   const [mounted, setMounted] = useState(false)
   useEffect(() => { setMounted(true) }, [])
 
-  const chartData = feature.history.map((h) => ({ week: h.week, value: h.users }))
+  const chartData = feature.history.map((h) => ({ week: h.week, value: h.users, lastYear: h.usersLastYear ?? null }))
 
   return (
     <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 flex flex-col gap-3">
@@ -458,16 +487,28 @@ function FeatureCard({ feature, premiumWAU }: { feature: FeatureMetric; premiumW
       <div className="h-24">
         {mounted && (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData} margin={{ top: 2, right: 0, bottom: 0, left: 0 }} barCategoryGap="25%">
+            <ComposedChart data={chartData} margin={{ top: 2, right: 0, bottom: 0, left: 0 }} barCategoryGap="25%">
               <XAxis dataKey="week" tick={{ fontSize: 9, fill: '#64748B' }} axisLine={false} tickLine={false} />
               <YAxis hide />
               <Tooltip
-                formatter={(v) => typeof v === 'number' ? v.toLocaleString() : String(v)}
+                formatter={(v, name) => [
+                  typeof v === 'number' ? v.toLocaleString() : String(v),
+                  name === 'lastYear' ? 'Last Year' : 'This Year',
+                ]}
                 labelFormatter={(label) => `Week of ${label}`}
                 contentStyle={{ fontSize: 12, border: '1px solid #E2E8F0', borderRadius: 6, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
               />
               <Bar dataKey="value" fill={feature.color} radius={[2, 2, 0, 0]} />
-            </BarChart>
+              <Line
+                type="monotone"
+                dataKey="lastYear"
+                stroke="#94A3B8"
+                strokeWidth={1.5}
+                strokeDasharray="4 4"
+                dot={false}
+                connectNulls={false}
+              />
+            </ComposedChart>
           </ResponsiveContainer>
         )}
       </div>
@@ -482,11 +523,15 @@ function FeatureAdoptionSection({ data: fa }: { data: FeatureAdoptionData }) {
   const hasAdoptionData = fa.features.some((f) => f.history.some((h) => (h.adoptionPct ?? 0) > 0))
 
   // Build combined chart data — adoption % when available, user counts as fallback
+  // Also include _ly (last year) keys for dashed YoY overlay lines
   const weekMap = new Map<string, Record<string, number | null>>()
   fa.features.forEach((f) => {
     f.history.forEach((h) => {
-      if (!weekMap.has(h.week)) weekMap.set(h.week, { week: h.week as unknown as number } as Record<string, number>)
+      if (!weekMap.has(h.week)) weekMap.set(h.week, { week: h.week as unknown as number } as Record<string, number | null>)
       weekMap.get(h.week)![f.name] = hasAdoptionData ? h.adoptionPct : h.users
+      weekMap.get(h.week)![`${f.name}_ly`] = hasAdoptionData
+        ? (h.adoptionPctLastYear ?? null)
+        : (h.usersLastYear ?? null)
     })
   })
   const combinedData = Array.from(weekMap.values())
@@ -524,7 +569,13 @@ function FeatureAdoptionSection({ data: fa }: { data: FeatureAdoptionData }) {
                 width={36}
               />
               <Tooltip
-                formatter={(v, name) => [hasAdoptionData ? `${Number(v).toFixed(2)}%` : Number(v).toLocaleString(), name]}
+                formatter={(v, name) => {
+                  const n = String(name)
+                  const isLy = n.endsWith('_ly')
+                  const label = isLy ? `${n.slice(0, -3)} (LY)` : n
+                  const display = hasAdoptionData ? `${Number(v).toFixed(2)}%` : Number(v).toLocaleString()
+                  return [display, label]
+                }}
                 labelFormatter={(label) => `Week of ${label}`}
                 contentStyle={{ fontSize: 12, border: '1px solid #E2E8F0', borderRadius: 6, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
               />
@@ -538,6 +589,21 @@ function FeatureAdoptionSection({ data: fa }: { data: FeatureAdoptionData }) {
                   strokeWidth={2}
                   dot={false}
                   activeDot={{ r: 4 }}
+                />
+              ))}
+              {fa.features.map((f) => (
+                <Line
+                  key={`${f.name}_ly`}
+                  type="monotone"
+                  dataKey={`${f.name}_ly`}
+                  stroke={f.color}
+                  strokeWidth={1}
+                  strokeDasharray="4 4"
+                  strokeOpacity={0.5}
+                  dot={false}
+                  activeDot={false}
+                  legendType="none"
+                  connectNulls={false}
                 />
               ))}
             </LineChart>
