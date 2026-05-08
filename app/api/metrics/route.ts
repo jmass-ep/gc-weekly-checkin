@@ -420,7 +420,7 @@ async function computeMetrics(auth: string, fromDateStr: string, toDate: string,
     wauBreakdown,
     ...featureResults
   ] = await runConcurrent([
-    () => safeQuery(auth, '$session_start',             fromDateStr, toDate, 'unique'),
+    () => safeQuery(auth, 'Visited Player Page',         fromDateStr, toDate, 'unique'),
     () => safeQuery(auth, 'Subscription Started',       fromDateStr, toDate, 'general'),
     () => safeQuery(auth, 'Requested Verification',     fromDateStr, toDate, 'unique', VERIF_PLAYER_FILTER),
     () => safeQuery(auth, 'Requested Verification',     fromDateStr, toDate, 'unique', VERIF_STAFF_FILTER),
@@ -436,7 +436,7 @@ async function computeMetrics(auth: string, fromDateStr: string, toDate: string,
     () => queryFunnel(auth, CONVERSION_FUNNEL_ID, fromDateStr, toDate).catch((err) => {
       console.error('Conversion funnel failed:', err); return emptyFunnel
     }),
-    () => queryMixpanelBreakdown(auth, '$session_start', fromDateStr, toDate, PREMIUM_BREAKDOWN_ON).catch((err) => {
+    () => queryMixpanelBreakdown(auth, 'Visited Player Page', fromDateStr, toDate, PREMIUM_BREAKDOWN_ON).catch((err) => {
       console.error('WAU breakdown failed:', err); return emptyBreakdown
     }),
     ...FEATURE_EVENTS.map(({ event }) =>

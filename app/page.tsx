@@ -107,7 +107,7 @@ function GrowthBadge({ pct }: { pct: number | null }) {
   )
 }
 
-function MetricCard({ metric }: { metric: MetricData }) {
+function MetricCard({ metric, note }: { metric: MetricData; note?: string }) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => { setMounted(true) }, [])
 
@@ -122,6 +122,9 @@ function MetricCard({ metric }: { metric: MetricData }) {
           {metric.thisWeek.toLocaleString()}
         </span>
         <GrowthBadge pct={metric.growthPct} />
+        {note && (
+          <p className="text-[10px] text-[#94A3B8] mt-1 leading-snug">{note}</p>
+        )}
       </div>
 
       <div className="h-32">
@@ -672,7 +675,11 @@ export default function DashboardPage() {
                   </h2>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {group.metrics.map((metric) => (
-                      <MetricCard key={metric.name} metric={metric} />
+                      <MetricCard
+                        key={metric.name}
+                        metric={metric}
+                        note={metric.name === 'Weekly Active Users' ? 'Proxied via Visited Player Page — tracks closely with session starts' : undefined}
+                      />
                     ))}
                     {gi === 0 && data.conversionRate && (
                       <ConversionRateCard data={data.conversionRate} />
