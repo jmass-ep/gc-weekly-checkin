@@ -38,6 +38,7 @@ interface MetricData {
   thisWeek: number
   previousWeek: number
   growthPct: number | null
+  yoyPct: number | null
   split: MetricSplit | null
   history: SimplePoint[] | SplitPoint[]
 }
@@ -56,6 +57,7 @@ interface ConversionRateData {
   thisWeek: number
   previousWeek: number
   growthPct: number | null
+  yoyPct: number | null
   history: SimplePoint[]
 }
 
@@ -71,6 +73,7 @@ interface FeatureMetric {
   thisWeek: number
   previousWeek: number
   growthPct: number | null
+  yoyPct: number | null
   adoptionPct: number | null
   adoptionPctPrev: number | null
   adoptionGrowthPct: number | null
@@ -92,17 +95,17 @@ interface DashboardData {
   groups: GroupData[]
 }
 
-function GrowthBadge({ pct }: { pct: number | null }) {
+function GrowthBadge({ pct, label = 'WoW' }: { pct: number | null; label?: string }) {
   if (pct === null) {
-    return <span className="text-sm text-[#64748B]">— WoW</span>
+    return <span className="text-sm text-[#64748B]">— {label}</span>
   }
   if (pct === 0) {
-    return <span className="text-sm text-[#64748B]">0.0% WoW</span>
+    return <span className="text-sm text-[#64748B]">0.0% {label}</span>
   }
   const pos = pct > 0
   return (
     <span className={`text-sm font-semibold ${pos ? 'text-[#16A34A]' : 'text-[#C8102E]'}`}>
-      {pos ? '↑' : '↓'} {Math.abs(pct).toFixed(1)}% WoW
+      {pos ? '↑' : '↓'} {Math.abs(pct).toFixed(1)}% {label}
     </span>
   )
 }
@@ -122,6 +125,7 @@ function MetricCard({ metric, note }: { metric: MetricData; note?: string }) {
           {metric.thisWeek.toLocaleString()}
         </span>
         <GrowthBadge pct={metric.growthPct} />
+        <GrowthBadge pct={metric.yoyPct} label="YoY" />
         {note && (
           <p className="text-[10px] text-[#94A3B8] mt-1 leading-snug">{note}</p>
         )}
@@ -386,6 +390,7 @@ function ConversionRateCard({ data: cr }: { data: ConversionRateData }) {
           {cr.thisWeek > 0 ? `${cr.thisWeek.toFixed(1)}%` : '—'}
         </span>
         <GrowthBadge pct={cr.growthPct} />
+        <GrowthBadge pct={cr.yoyPct} label="YoY" />
       </div>
 
       <div className="h-32">
@@ -447,6 +452,7 @@ function FeatureCard({ feature, premiumWAU }: { feature: FeatureMetric; premiumW
           )}
         </div>
         <GrowthBadge pct={feature.growthPct} />
+        <GrowthBadge pct={feature.yoyPct} label="YoY" />
       </div>
 
       <div className="h-24">
@@ -476,11 +482,11 @@ function FeatureAdoptionSection({ data: fa }: { data: FeatureAdoptionData }) {
   const hasAdoptionData = fa.features.some((f) => f.history.some((h) => (h.adoptionPct ?? 0) > 0))
 
   // Build combined chart data — adoption % when available, user counts as fallback
-  const weekMap = new Map<string, Record<string, number>>()
+  const weekMap = new Map<string, Record<string, number | null>>()
   fa.features.forEach((f) => {
     f.history.forEach((h) => {
       if (!weekMap.has(h.week)) weekMap.set(h.week, { week: h.week as unknown as number } as Record<string, number>)
-      weekMap.get(h.week)![f.name] = hasAdoptionData ? (h.adoptionPct ?? 0) : h.users
+      weekMap.get(h.week)![f.name] = hasAdoptionData ? h.adoptionPct : h.users
     })
   })
   const combinedData = Array.from(weekMap.values())

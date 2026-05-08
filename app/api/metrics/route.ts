@@ -222,13 +222,17 @@ function buildSimpleMetric(name: string, data: SegResult) {
   const n = values.length
   const thisWeek = n > 0 ? values[n - 1] : 0
   const previousWeek = n > 1 ? values[n - 2] : 0
+  const yoyPct = n >= 53 ? calcGrowth(thisWeek, values[n - 53]) : null
+  const recentSeries = series.slice(-9)
+  const recentValues = values.slice(-9)
   return {
     name,
     thisWeek,
     previousWeek,
     growthPct: calcGrowth(thisWeek, previousWeek),
+    yoyPct,
     split: null,
-    history: series.map((date, i) => ({ week: formatWeekLabel(date), value: values[i] })),
+    history: recentSeries.map((date, i) => ({ week: formatWeekLabel(date), value: recentValues[i] })),
   }
 }
 
@@ -241,23 +245,29 @@ function buildSplitMetric(name: string, playerData: SegResult, staffData: SegRes
 
   const thisWeek = n > 0 ? totalVals[n - 1] : 0
   const previousWeek = n > 1 ? totalVals[n - 2] : 0
+  const yoyPct = n >= 53 ? calcGrowth(thisWeek, totalVals[n - 53]) : null
   const pThis = n > 0 ? pVals[n - 1] : 0
   const pPrev = n > 1 ? pVals[n - 2] : 0
   const sThis = n > 0 ? sVals[n - 1] : 0
   const sPrev = n > 1 ? sVals[n - 2] : 0
 
-  const history = series.map((date, i) => ({
-    week: formatWeekLabel(date),
-    player: pVals[i] ?? 0,
-    staff: sVals[i] ?? 0,
-    value: (pVals[i] ?? 0) + (sVals[i] ?? 0),
-  }))
+  const recentSeries = series.slice(-9)
+  const history = recentSeries.map((date, i) => {
+    const idx = n - recentSeries.length + i
+    return {
+      week: formatWeekLabel(date),
+      player: pVals[idx] ?? 0,
+      staff: sVals[idx] ?? 0,
+      value: (pVals[idx] ?? 0) + (sVals[idx] ?? 0),
+    }
+  })
 
   return {
     name,
     thisWeek,
     previousWeek,
     growthPct: calcGrowth(thisWeek, previousWeek),
+    yoyPct,
     split: {
       player: { thisWeek: pThis, previousWeek: pPrev, growthPct: calcGrowth(pThis, pPrev), history },
       staff: { thisWeek: sThis, previousWeek: sPrev, growthPct: calcGrowth(sThis, sPrev) },
@@ -276,13 +286,17 @@ function buildConversionRate(rawFunnel: FunnelResult) {
   })
   const thisWeek = n > 0 ? rates[n - 1] : 0
   const previousWeek = n > 1 ? rates[n - 2] : 0
+  const yoyPct = n >= 53 ? calcGrowth(thisWeek, rates[n - 53]) : null
+  const recentSeries = series.slice(-9)
+  const recentRates = rates.slice(-9)
   return {
     thisWeek,
     previousWeek,
     growthPct: calcGrowth(thisWeek, previousWeek),
-    history: series.map((date, i) => ({
+    yoyPct,
+    history: recentSeries.map((date, i) => ({
       week: formatWeekLabel(date.split('T')[0]),
-      value: rates[i],
+      value: recentRates[i],
     })),
   }
 }
@@ -331,10 +345,15 @@ function buildFeatureAdoption(
     const adoptionPct = curr >= 0 ? adoptionRates[curr] : null
     const adoptionPctPrev = prev >= 0 ? adoptionRates[prev] : null
 
-    const history = wauSeries.map((date, i) => ({
+    const yoyIndex = curr - 52
+    const yoyPct = yoyIndex >= 0 ? calcGrowth(thisWeekUsers, featureValues[yoyIndex]) : null
+
+    const recentWauSeries = wauSeries.slice(-9)
+    const recentOffset = wauSeries.length - recentWauSeries.length
+    const history = recentWauSeries.map((date, i) => ({
       week: formatWeekLabel(date.split('T')[0]),
-      users: featureValues[i],
-      adoptionPct: adoptionRates[i],
+      users: featureValues[recentOffset + i],
+      adoptionPct: adoptionRates[recentOffset + i],
     }))
 
     return {
@@ -343,6 +362,7 @@ function buildFeatureAdoption(
       thisWeek: thisWeekUsers,
       previousWeek: prevWeekUsers,
       growthPct: calcGrowth(thisWeekUsers, prevWeekUsers),
+      yoyPct,
       adoptionPct,
       adoptionPctPrev,
       adoptionGrowthPct: adoptionPct !== null && adoptionPctPrev !== null
@@ -527,7 +547,7 @@ export async function GET() {
   lastSunday.setDate(today.getDate() - daysToLastSunday)
 
   const fromDate = new Date(lastSunday)
-  fromDate.setDate(lastSunday.getDate() - 62)
+  fromDate.setDate(lastSunday.getDate() - 426) // 9 current weeks + 52 prior weeks for YoY
 
   const toDate = toDateStr(lastSunday)
   const fromDateStr = toDateStr(fromDate)
