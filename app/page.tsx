@@ -831,28 +831,29 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* Full-page error */}
-        {error && (
-          <div className="flex flex-col items-center justify-center py-24 px-6 text-center">
-            <p className="text-[#1A202C] text-lg font-semibold mb-2">Failed to load dashboard data</p>
-            <p className="text-[#64748B] text-sm mb-6 max-w-sm">{error}</p>
-            <button
-              onClick={loadData}
-              className="px-5 py-2 rounded-lg text-sm font-semibold text-white"
-              style={{ backgroundColor: '#0D2137' }}
-            >
-              Retry
-            </button>
-          </div>
-        )}
+        {/* Main content — always rendered so ChartMogul shows even when Mixpanel is down */}
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-10">
+          {/* ChartMogul Weekly Summary — always first, independent of Mixpanel */}
+          {cmData && (
+            <ChartMogulSection data={cmData} />
+          )}
 
-        {/* Main content */}
-        {!error && (
-          <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-10">
-            {/* ChartMogul Weekly Summary — always first */}
-            {cmData && (
-              <ChartMogulSection data={cmData} />
-            )}
+          {/* Inline Mixpanel error banner */}
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-xl px-5 py-4 flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-red-800">Mixpanel data unavailable</p>
+                <p className="text-xs text-red-600 mt-0.5">{error}</p>
+              </div>
+              <button
+                onClick={loadData}
+                className="shrink-0 px-4 py-2 rounded-lg text-sm font-semibold text-white"
+                style={{ backgroundColor: '#C8102E' }}
+              >
+                Retry
+              </button>
+            </div>
+          )}
 
             {loading ? (
               SKELETON_GROUPS.map((g) => (
@@ -907,11 +908,10 @@ export default function DashboardPage() {
             {data?.featureAdoption && (
               <FeatureAdoptionSection data={data.featureAdoption} />
             )}
-          </main>
-        )}
+        </main>
 
         {/* Footer */}
-        {!error && !loading && data && (
+        {!loading && data && (
           <footer className="max-w-7xl mx-auto px-4 sm:px-6 pb-8 flex items-center justify-between">
             <p className="text-xs text-[#64748B]">
               Last refreshed:{' '}
