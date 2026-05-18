@@ -507,16 +507,29 @@ function ChartMogulSection({ data: cm }: { data: ChartMogulData }) {
     return `$${n.toFixed(0)}`
   }
 
+  function formatAbsChange(diff: number, isMoney: boolean): string {
+    const sign = diff > 0 ? '+' : diff < 0 ? '-' : ''
+    const abs = Math.abs(diff)
+    if (isMoney) {
+      if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`
+      if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(1)}K`
+      return `${sign}$${abs.toFixed(0)}`
+    }
+    return `${sign}${abs.toLocaleString()}`
+  }
+
   const cards: {
     label: string
     value: string
+    diff: number
+    isMoney: boolean
     growthPct: number | null
     history?: SimplePoint[]
     color: string
   }[] = [
-    { label: 'MRR', value: formatMoney(cm.mrr.thisWeek), growthPct: cm.mrr.growthPct, history: cm.mrr.history, color: '#0D2137' },
-    { label: 'ARR', value: formatMoney(cm.arr.thisWeek), growthPct: cm.arr.growthPct, history: cm.mrr.history.map((h) => ({ ...h, value: h.value * 12 })), color: '#0D2137' },
-    { label: 'Active Subscribers', value: cm.subscribers.thisWeek.toLocaleString(), growthPct: cm.subscribers.growthPct, history: cm.subscribers.history, color: '#C8102E' },
+    { label: 'MRR', value: formatMoney(cm.mrr.thisWeek), diff: cm.mrr.thisWeek - cm.mrr.previousWeek, isMoney: true, growthPct: cm.mrr.growthPct, history: cm.mrr.history, color: '#0D2137' },
+    { label: 'ARR', value: formatMoney(cm.arr.thisWeek), diff: cm.arr.thisWeek - cm.arr.previousWeek, isMoney: true, growthPct: cm.arr.growthPct, history: cm.mrr.history.map((h) => ({ ...h, value: h.value * 12 })), color: '#0D2137' },
+    { label: 'Active Subscribers', value: cm.subscribers.thisWeek.toLocaleString(), diff: cm.subscribers.thisWeek - cm.subscribers.previousWeek, isMoney: false, growthPct: cm.subscribers.growthPct, history: cm.subscribers.history, color: '#C8102E' },
   ]
 
   return (
@@ -533,6 +546,11 @@ function ChartMogulSection({ data: cm }: { data: ChartMogulData }) {
             <p className="text-sm font-semibold text-[#0D2137] leading-snug">{c.label}</p>
             <div className="flex flex-col gap-0.5">
               <span className="text-3xl font-bold text-[#1A202C] tabular-nums leading-tight">{c.value}</span>
+              {c.diff !== 0 && (
+                <span className={`text-sm font-semibold ${c.diff > 0 ? 'text-[#16A34A]' : 'text-[#C8102E]'}`}>
+                  {formatAbsChange(c.diff, c.isMoney)}
+                </span>
+              )}
               <GrowthBadge pct={c.growthPct} />
             </div>
             {c.history && c.history.length > 0 && (
