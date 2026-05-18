@@ -409,7 +409,7 @@ function FunnelCard({ funnel }: { funnel: FunnelData }) {
       {mounted && funnel.activationRateHistory && funnel.activationRateHistory.length > 0 && (
         <div className="mt-4 pt-4 border-t border-[#E2E8F0]">
           <p className="text-xs text-[#64748B] mb-2">Conversion Rate Trend (Sign Up → Completed Onboarding)</p>
-          <ResponsiveContainer width="100%" height={80}>
+          <ResponsiveContainer width="100%" height={160}>
             <LineChart data={funnel.activationRateHistory} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
               <XAxis dataKey="week" tick={{ fontSize: 9, fill: '#64748B' }} axisLine={false} tickLine={false} />
               <YAxis
