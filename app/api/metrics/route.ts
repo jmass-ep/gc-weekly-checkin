@@ -210,6 +210,10 @@ function safeQuery(
   where?: string
 ): Promise<SegResult> {
   return queryMixpanel(auth, event, fromDate, toDate, type, where).catch((err) => {
+    const msg = err instanceof Error ? err.message : String(err)
+    // Don't swallow rate-limit errors — let them propagate so unstable_cache
+    // doesn't store a zeros result for 6 hours.
+    if (msg.includes('429')) throw err
     console.error(`safeQuery failed for "${event}":`, err)
     return { series: [], values: [] }
   })
