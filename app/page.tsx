@@ -528,7 +528,7 @@ function ChartMogulSection({ data: cm }: { data: ChartMogulData }) {
     color: string
   }[] = [
     { label: 'MRR', value: formatMoney(cm.mrr.thisWeek), diff: cm.mrr.thisWeek - cm.mrr.previousWeek, isMoney: true, growthPct: cm.mrr.growthPct, history: cm.mrr.history, color: '#0D2137' },
-    { label: 'ARR', value: formatMoney(cm.arr.thisWeek), diff: cm.arr.thisWeek - cm.arr.previousWeek, isMoney: true, growthPct: cm.arr.growthPct, color: '#0D2137' },
+    { label: 'ARR', value: formatMoney(cm.arr.thisWeek), diff: cm.arr.thisWeek - cm.arr.previousWeek, isMoney: true, growthPct: cm.arr.growthPct, history: cm.mrr.history.map((h) => ({ ...h, value: h.value * 12 })), color: '#0D2137' },
     { label: 'Active Subscribers', value: cm.subscribers.thisWeek.toLocaleString(), diff: cm.subscribers.thisWeek - cm.subscribers.previousWeek, isMoney: false, growthPct: cm.subscribers.growthPct, history: cm.subscribers.history, color: '#C8102E' },
   ]
 
