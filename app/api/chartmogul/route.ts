@@ -85,10 +85,16 @@ export async function GET() {
 
   const auth = Buffer.from(`${apiKey}:`).toString('base64')
 
+  // Align to the same week boundary as Mixpanel: last completed Sunday
   const today = new Date()
-  const endDate = toDateStr(today)
-  const startDateObj = new Date(today)
-  startDateObj.setDate(today.getDate() - 63) // ~9 weeks back
+  const dow = today.getDay()
+  const daysToLastSunday = dow === 0 ? 7 : dow
+  const lastSunday = new Date(today)
+  lastSunday.setDate(today.getDate() - daysToLastSunday)
+
+  const endDate = toDateStr(lastSunday)
+  const startDateObj = new Date(lastSunday)
+  startDateObj.setDate(lastSunday.getDate() - 63) // ~9 weeks back
   const startDateStr = toDateStr(startDateObj)
 
   const getCached = unstable_cache(
