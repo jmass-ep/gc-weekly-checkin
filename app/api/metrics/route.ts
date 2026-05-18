@@ -657,6 +657,15 @@ export async function GET() {
     { revalidate: 21600 } // 6 hours — weekly dashboard, no need to re-query more often
   )
 
-  const payload = await getCached()
-  return Response.json(payload)
+  try {
+    const payload = await getCached()
+    return Response.json(payload)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'fetch_failed'
+    const isRateLimit = msg.includes('429')
+    return Response.json(
+      { error: isRateLimit ? 'Mixpanel rate limit hit — please wait a few minutes and retry.' : msg },
+      { status: 503 }
+    )
+  }
 }
