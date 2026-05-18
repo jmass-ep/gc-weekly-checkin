@@ -94,7 +94,7 @@ export async function GET() {
   const getCached = unstable_cache(
     () => computeChartMogul(auth, startDateStr, endDate),
     [`chartmogul-${startDateStr}-${endDate}`],
-    { revalidate: 1800 },
+    { revalidate: 21600 }, // 6 hours
   )
 
   try {

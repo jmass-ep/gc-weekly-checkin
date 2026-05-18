@@ -650,7 +650,7 @@ export async function GET() {
   const getCached = unstable_cache(
     () => computeMetrics(auth, fromDateStr, toDate, weekLabel),
     [`metrics-${fromDateStr}-${toDate}`],
-    { revalidate: 1800 }
+    { revalidate: 21600 } // 6 hours — weekly dashboard, no need to re-query more often
   )
 
   const payload = await getCached()
