@@ -3,10 +3,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   BarChart, Bar,
-  ComposedChart,
   LineChart, Line,
   XAxis, YAxis,
   Tooltip, Legend,
+  ReferenceLine,
   ResponsiveContainer,
   LabelList,
 } from 'recharts'
@@ -54,6 +54,7 @@ interface GroupData {
 interface FunnelData {
   steps: MetricData[]
   activationRate: number | null
+  activationRateHistory: { week: string; value: number | null }[]
 }
 
 interface ConversionRateData {
@@ -100,6 +101,22 @@ interface DashboardData {
   groups: GroupData[]
 }
 
+interface CmSimple {
+  thisWeek: number
+  previousWeek: number
+  growthPct: number | null
+}
+
+interface CmWithHistory extends CmSimple {
+  history: SimplePoint[]
+}
+
+interface ChartMogulData {
+  mrr: CmWithHistory
+  arr: CmSimple
+  subscribers: CmWithHistory
+}
+
 function GrowthBadge({ pct, label = 'WoW' }: { pct: number | null; label?: string }) {
   if (pct === null) {
     return <span className="text-sm text-[#64748B]">— {label}</span>
@@ -139,7 +156,7 @@ function MetricCard({ metric, note }: { metric: MetricData; note?: string }) {
       <div className="h-32">
         {mounted && (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart
+            <BarChart
               data={metric.history}
               margin={{ top: 2, right: 0, bottom: 0, left: 0 }}
               barCategoryGap="25%"
@@ -154,7 +171,7 @@ function MetricCard({ metric, note }: { metric: MetricData; note?: string }) {
               <Tooltip
                 formatter={(value, name) => [
                   typeof value === 'number' ? value.toLocaleString() : String(value),
-                  name === 'lastYear' ? 'Last Year' : name === 'value' ? 'This Year' : String(name),
+                  name === 'lastYear' ? 'Last Year' : name === 'player' ? 'Player' : name === 'staff' ? 'Staff' : 'This Year',
                 ]}
                 labelFormatter={(label) => `Week of ${label}`}
                 contentStyle={{
@@ -172,16 +189,13 @@ function MetricCard({ metric, note }: { metric: MetricData; note?: string }) {
               ) : (
                 <Bar dataKey="value" fill="#0D2137" radius={[2, 2, 0, 0]} />
               )}
-              <Line
-                type="monotone"
-                dataKey="lastYear"
-                stroke="#94A3B8"
-                strokeWidth={1.5}
-                strokeDasharray="4 4"
-                dot={false}
-                connectNulls={false}
-              />
-            </ComposedChart>
+              {(() => {
+                const ly = metric.history.at(-1)?.lastYear
+                return ly != null ? (
+                  <ReferenceLine y={ly} stroke="#94A3B8" strokeDasharray="4 4" strokeWidth={1.5} />
+                ) : null
+              })()}
+            </BarChart>
           </ResponsiveContainer>
         )}
       </div>
@@ -390,6 +404,39 @@ function FunnelCard({ funnel }: { funnel: FunnelData }) {
           </BarChart>
         </ResponsiveContainer>
       )}
+
+      {/* Activation rate trend sparkline */}
+      {mounted && funnel.activationRateHistory && funnel.activationRateHistory.length > 0 && (
+        <div className="mt-4 pt-4 border-t border-[#E2E8F0]">
+          <p className="text-xs text-[#64748B] mb-2">Conversion Rate Trend (Sign Up → Completed Onboarding)</p>
+          <ResponsiveContainer width="100%" height={80}>
+            <LineChart data={funnel.activationRateHistory} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+              <XAxis dataKey="week" tick={{ fontSize: 9, fill: '#64748B' }} axisLine={false} tickLine={false} />
+              <YAxis
+                tick={{ fontSize: 9, fill: '#64748B' }}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(v) => `${v}%`}
+                width={28}
+              />
+              <Tooltip
+                formatter={(v) => [`${Number(v).toFixed(1)}%`, 'Conversion Rate']}
+                labelFormatter={(label) => `Week of ${label}`}
+                contentStyle={{ fontSize: 12, border: '1px solid #E2E8F0', borderRadius: 6 }}
+              />
+              <Line
+                type="monotone"
+                dataKey="value"
+                stroke="#C8102E"
+                strokeWidth={2}
+                dot={false}
+                activeDot={{ r: 4 }}
+                connectNulls={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
     </div>
   )
 }
@@ -413,7 +460,7 @@ function ConversionRateCard({ data: cr }: { data: ConversionRateData }) {
       <div className="h-32">
         {mounted && (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart
+            <BarChart
               data={cr.history}
               margin={{ top: 2, right: 0, bottom: 0, left: 0 }}
               barCategoryGap="25%"
@@ -426,10 +473,7 @@ function ConversionRateCard({ data: cr }: { data: ConversionRateData }) {
               />
               <YAxis hide />
               <Tooltip
-                formatter={(v, name) => [
-                  typeof v === 'number' ? `${Number(v).toFixed(1)}%` : String(v),
-                  name === 'lastYear' ? 'Last Year' : 'This Year',
-                ]}
+                formatter={(v) => typeof v === 'number' ? `${v.toFixed(1)}%` : String(v)}
                 labelFormatter={(label) => `Week of ${label}`}
                 contentStyle={{
                   fontSize: 12,
@@ -439,20 +483,86 @@ function ConversionRateCard({ data: cr }: { data: ConversionRateData }) {
                 }}
               />
               <Bar dataKey="value" fill="#0D2137" radius={[2, 2, 0, 0]} />
-              <Line
-                type="monotone"
-                dataKey="lastYear"
-                stroke="#94A3B8"
-                strokeWidth={1.5}
-                strokeDasharray="4 4"
-                dot={false}
-                connectNulls={false}
-              />
-            </ComposedChart>
+              {(() => {
+                const ly = cr.history.at(-1)?.lastYear
+                return ly != null ? (
+                  <ReferenceLine y={ly} stroke="#94A3B8" strokeDasharray="4 4" strokeWidth={1.5} />
+                ) : null
+              })()}
+            </BarChart>
           </ResponsiveContainer>
         )}
       </div>
     </div>
+  )
+}
+
+function ChartMogulSection({ data: cm }: { data: ChartMogulData }) {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
+
+  function formatMoney(n: number) {
+    if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`
+    if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`
+    return `$${n.toFixed(0)}`
+  }
+
+  const cards: {
+    label: string
+    value: string
+    growthPct: number | null
+    history?: SimplePoint[]
+    color: string
+  }[] = [
+    { label: 'MRR', value: formatMoney(cm.mrr.thisWeek), growthPct: cm.mrr.growthPct, history: cm.mrr.history, color: '#0D2137' },
+    { label: 'ARR', value: formatMoney(cm.arr.thisWeek), growthPct: cm.arr.growthPct, color: '#0D2137' },
+    { label: 'Active Subscribers', value: cm.subscribers.thisWeek.toLocaleString(), growthPct: cm.subscribers.growthPct, history: cm.subscribers.history, color: '#C8102E' },
+  ]
+
+  return (
+    <section>
+      <h2
+        className="text-xs font-bold uppercase tracking-widest text-[#0D2137] pl-3 mb-4"
+        style={{ borderLeft: '3px solid #C8102E' }}
+      >
+        ChartMogul Weekly Summary
+      </h2>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {cards.map((c) => (
+          <div key={c.label} className="bg-white border border-[#E2E8F0] rounded-xl p-5 flex flex-col gap-3">
+            <p className="text-sm font-semibold text-[#0D2137] leading-snug">{c.label}</p>
+            <div className="flex flex-col gap-0.5">
+              <span className="text-3xl font-bold text-[#1A202C] tabular-nums leading-tight">{c.value}</span>
+              <GrowthBadge pct={c.growthPct} />
+            </div>
+            {c.history && c.history.length > 0 && (
+              <div className="h-24">
+                {mounted && (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={c.history} margin={{ top: 2, right: 0, bottom: 0, left: 0 }} barCategoryGap="25%">
+                      <XAxis dataKey="week" tick={{ fontSize: 9, fill: '#64748B' }} axisLine={false} tickLine={false} />
+                      <YAxis hide />
+                      <Tooltip
+                        formatter={(v) =>
+                          typeof v === 'number'
+                            ? c.label === 'Active Subscribers'
+                              ? v.toLocaleString()
+                              : formatMoney(v)
+                            : String(v)
+                        }
+                        labelFormatter={(label) => `Week of ${label}`}
+                        contentStyle={{ fontSize: 12, border: '1px solid #E2E8F0', borderRadius: 6, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
+                      />
+                      <Bar dataKey="value" fill={c.color} radius={[2, 2, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
   )
 }
 
@@ -487,28 +597,22 @@ function FeatureCard({ feature, premiumWAU }: { feature: FeatureMetric; premiumW
       <div className="h-24">
         {mounted && (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={chartData} margin={{ top: 2, right: 0, bottom: 0, left: 0 }} barCategoryGap="25%">
+            <BarChart data={chartData} margin={{ top: 2, right: 0, bottom: 0, left: 0 }} barCategoryGap="25%">
               <XAxis dataKey="week" tick={{ fontSize: 9, fill: '#64748B' }} axisLine={false} tickLine={false} />
               <YAxis hide />
               <Tooltip
-                formatter={(v, name) => [
-                  typeof v === 'number' ? v.toLocaleString() : String(v),
-                  name === 'lastYear' ? 'Last Year' : 'This Year',
-                ]}
+                formatter={(v) => typeof v === 'number' ? v.toLocaleString() : String(v)}
                 labelFormatter={(label) => `Week of ${label}`}
                 contentStyle={{ fontSize: 12, border: '1px solid #E2E8F0', borderRadius: 6, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
               />
               <Bar dataKey="value" fill={feature.color} radius={[2, 2, 0, 0]} />
-              <Line
-                type="monotone"
-                dataKey="lastYear"
-                stroke="#94A3B8"
-                strokeWidth={1.5}
-                strokeDasharray="4 4"
-                dot={false}
-                connectNulls={false}
-              />
-            </ComposedChart>
+              {(() => {
+                const ly = chartData.at(-1)?.lastYear
+                return ly != null ? (
+                  <ReferenceLine y={ly} stroke="#94A3B8" strokeDasharray="4 4" strokeWidth={1.5} />
+                ) : null
+              })()}
+            </BarChart>
           </ResponsiveContainer>
         )}
       </div>
@@ -559,9 +663,22 @@ function FeatureAdoptionSection({ data: fa }: { data: FeatureAdoptionData }) {
             {hasAdoptionData ? '8-Week Adoption Rate Trend' : '8-Week User Trend'}
           </p>
           <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={combinedData} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
+            <LineChart data={combinedData} margin={{ top: 4, right: 48, bottom: 0, left: 0 }}>
               <XAxis dataKey="week" tick={{ fontSize: 10, fill: '#64748B' }} axisLine={false} tickLine={false} />
+              {/* Left axis: Visited My Feed (high values) */}
               <YAxis
+                yAxisId="feed"
+                orientation="left"
+                tick={{ fontSize: 10, fill: '#64748B' }}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(v) => hasAdoptionData ? `${v}%` : v.toLocaleString()}
+                width={36}
+              />
+              {/* Right axis: other 3 features (lower values) */}
+              <YAxis
+                yAxisId="others"
+                orientation="right"
                 tick={{ fontSize: 10, fill: '#64748B' }}
                 axisLine={false}
                 tickLine={false}
@@ -589,6 +706,7 @@ function FeatureAdoptionSection({ data: fa }: { data: FeatureAdoptionData }) {
                   strokeWidth={2}
                   dot={false}
                   activeDot={{ r: 4 }}
+                  yAxisId={f.name === 'Visited My Feed' ? 'feed' : 'others'}
                 />
               ))}
               {fa.features.map((f) => (
@@ -604,6 +722,7 @@ function FeatureAdoptionSection({ data: fa }: { data: FeatureAdoptionData }) {
                   activeDot={false}
                   legendType="none"
                   connectNulls={false}
+                  yAxisId={f.name === 'Visited My Feed' ? 'feed' : 'others'}
                 />
               ))}
             </LineChart>
@@ -628,6 +747,7 @@ export default function DashboardPage() {
   const [loadingVisible, setLoadingVisible] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [missingCreds, setMissingCreds] = useState(false)
+  const [cmData, setCmData] = useState<ChartMogulData | null>(null)
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -656,6 +776,10 @@ export default function DashboardPage() {
 
   useEffect(() => {
     loadData()
+    fetch('/api/chartmogul')
+      .then((r) => r.json())
+      .then((j: ChartMogulData & { error?: string }) => { if (!j.error) setCmData(j) })
+      .catch(() => {})
   }, [loadData])
 
   // Once the initial fetch resolves, fade out the loading screen
@@ -760,6 +884,11 @@ export default function DashboardPage() {
                 </section>
               ))
             ) : null}
+
+            {/* ChartMogul Weekly Summary */}
+            {cmData && (
+              <ChartMogulSection data={cmData} />
+            )}
 
             {/* Activation funnel */}
             {data?.funnel && (

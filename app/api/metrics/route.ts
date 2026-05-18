@@ -567,6 +567,16 @@ async function computeMetrics(auth: string, fromDateStr: string, toDate: string,
     ? round1((funnelSteps[5].thisWeek / funnelSteps[1].thisWeek) * 100)
     : null
 
+  // Per-week signup→completed-onboarding conversion rate history
+  const activationRateHistory = rawOnboarding.series.map((date, wi) => {
+    const signUps   = rawOnboarding.stepCounts[wi]?.[1] ?? 0
+    const completed = rawOnboarding.stepCounts[wi]?.[5] ?? 0
+    return {
+      week: formatWeekLabel(date.split('T')[0]),
+      value: signUps > 0 ? round1((completed / signUps) * 100) : null,
+    }
+  })
+
   // ── Feature adoption ─────────────────────────────────────────────────────
   const { premiumWAU, features } = buildFeatureAdoption(wauBreakdown, featureResults, yoyFeatureResults, yoyWauBreakdown)
   const insight = await generateInsight(features, premiumWAU)
@@ -575,7 +585,7 @@ async function computeMetrics(auth: string, fromDateStr: string, toDate: string,
     generatedAt: new Date().toISOString(),
     weekLabel,
     conversionRate: buildConversionRate(rawConversion, yoyConvRate, yoyConvFunnel),
-    funnel: { steps: funnelSteps, activationRate },
+    funnel: { steps: funnelSteps, activationRate, activationRateHistory },
     featureAdoption: { premiumWAU, features, insight },
     groups: [
       {
