@@ -849,6 +849,11 @@ export default function DashboardPage() {
         {/* Main content */}
         {!error && (
           <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-10">
+            {/* ChartMogul Weekly Summary — always first */}
+            {cmData && (
+              <ChartMogulSection data={cmData} />
+            )}
+
             {loading ? (
               SKELETON_GROUPS.map((g) => (
                 <section key={g.name}>
@@ -884,11 +889,6 @@ export default function DashboardPage() {
                 </section>
               ))
             ) : null}
-
-            {/* ChartMogul Weekly Summary */}
-            {cmData && (
-              <ChartMogulSection data={cmData} />
-            )}
 
             {/* Activation funnel */}
             {data?.funnel && (
