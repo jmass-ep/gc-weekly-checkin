@@ -557,9 +557,9 @@ function ChartMogulSection({ data: cm }: { data: ChartMogulData }) {
               <div className="h-24">
                 {mounted && (
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={c.history} margin={{ top: 2, right: 0, bottom: 0, left: 0 }} barCategoryGap="25%">
+                    <LineChart data={c.history} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
                       <XAxis dataKey="week" tick={{ fontSize: 9, fill: '#64748B' }} axisLine={false} tickLine={false} />
-                      <YAxis hide />
+                      <YAxis hide domain={['auto', 'auto']} />
                       <Tooltip
                         formatter={(v) =>
                           typeof v === 'number'
@@ -571,8 +571,15 @@ function ChartMogulSection({ data: cm }: { data: ChartMogulData }) {
                         labelFormatter={(label) => `Week of ${label}`}
                         contentStyle={{ fontSize: 12, border: '1px solid #E2E8F0', borderRadius: 6, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
                       />
-                      <Bar dataKey="value" fill={c.color} radius={[2, 2, 0, 0]} />
-                    </BarChart>
+                      <Line
+                        type="monotone"
+                        dataKey="value"
+                        stroke={c.color}
+                        strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 4 }}
+                      />
+                    </LineChart>
                   </ResponsiveContainer>
                 )}
               </div>
